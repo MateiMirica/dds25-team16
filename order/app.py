@@ -42,7 +42,7 @@ def create_kafka_producer():
 def create_kafka_consumer(topic):
     conf = {
         'bootstrap.servers': "kafka:9092",
-        'group.id': "group",
+        'group.id': "orders",
         'auto.offset.reset': 'earliest'
     }
     consumer = Consumer(**conf)
@@ -200,7 +200,7 @@ def send_to_kafka(topic, data):
     producer.produce(topic, data)
     producer.flush()
 
-@app.route('/kafka_demo_order', methods=['POST'])
+@app.route('/kafka_demo', methods=['POST'])
 def demo_kafka():
     """ Demo kafka """
     message = {
@@ -212,27 +212,27 @@ def demo_kafka():
 
 def consume_messages(consumer):
     while True:
-        message = consumer.poll(1.0)
+        message = consumer.poll(0.1)
         if message is None:
             continue
         if message.error():
-            print(f"Consumer error: {message.error()}")
+            app.logger.info(f"Consumer error: {message.error()}")
             continue
-        print(f"Received message: {message.value().decode('utf-8')}")
+        app.logger.info(f"Received message: {message.value().decode('utf-8')}")
 
-def start_consumer_thread():
-    consumer = create_kafka_consumer('demo_topic')
+def start_consumer_thread(topic):
+    consumer = create_kafka_consumer(topic)
     thread = threading.Thread(target=consume_messages, args=(consumer,))
     thread.daemon = True
     thread.start()
-def initialize_consumer():
-    start_consumer_thread()
 
 if __name__ == '__main__':
-    start_consumer_thread()
+    start_consumer_thread('demo_topic1')
+    start_consumer_thread('demo_topic2')
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
+    start_consumer_thread('demo_topic1')
+    start_consumer_thread('demo_topic2')
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
-    start_consumer_thread()
