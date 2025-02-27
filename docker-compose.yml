@@ -1,6 +1,25 @@
 version: "3"
 services:
 
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.2.0
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+  kafka:
+    image: confluentinc/cp-kafka:7.2.0
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,PLAINTEXT://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,PLAINTEXT://localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
   gateway:
     image: nginx:1.25-bookworm
     volumes:
@@ -22,6 +41,7 @@ services:
       - env/order_redis.env
     depends_on:
       - order-db
+      - kafka
 
   order-db:
     image: redis:7.2-bookworm
@@ -35,6 +55,7 @@ services:
       - env/stock_redis.env
     depends_on:
       - stock-db
+      - kafka
 
   stock-db:
     image: redis:7.2-bookworm
@@ -48,6 +69,7 @@ services:
       - env/payment_redis.env
     depends_on:
       - payment-db
+      - kafka
 
   payment-db:
     image: redis:7.2-bookworm
