@@ -103,10 +103,12 @@ class PaymentWorker():
         if user_entry.credit < 0:
             self.logger.info(f"Not enough balance for user {userId}")
             self.paymentFailed(orderId)
+            return
         try:
             self.db.set(userId, msgpack.encode(user_entry))
         except redis.exceptions.RedisError:
             self.paymentFailed(orderId)
+            return
 
         self.logger.info(f"Payment successful for order {orderId}")
         self.paymentSuccess(orderId)
