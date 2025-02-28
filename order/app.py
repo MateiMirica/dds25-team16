@@ -200,7 +200,7 @@ def process_response_stock(response: str):
 
 def process_response_payment(response: str):
     status = json.loads(response)
-    order_id = status["oderId"]
+    order_id = status["orderId"]
     order_entry: OrderValue = get_order_from_db(order_id)
     if status["status"] is True:
         order_entry.paid = True
