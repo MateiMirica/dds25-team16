@@ -101,12 +101,14 @@ class PaymentWorker():
         # update credit, serialize and update database
         user_entry.credit -= int(amount)
         if user_entry.credit < 0:
+            self.logger.info(f"Not enough balance for user {userId}")
             self.paymentFailed(orderId)
         try:
             self.db.set(userId, msgpack.encode(user_entry))
         except redis.exceptions.RedisError:
             self.paymentFailed(orderId)
 
+        self.logger.info(f"Payment successful for order {orderId}")
         self.paymentSuccess(orderId)
     
     def performRollback(self, msg):

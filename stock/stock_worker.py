@@ -93,21 +93,23 @@ class StockWorker():
         try:
             t = self.multiItemSubInMemory(items)
             self.db.mset(t)
-        except:
+        except Exception as e:
+            self.logger.info(str(e))
             self.stockFailed(orderId)
             return
-        self.logger.debug(f"Stock substraction succesfull for order {orderId}")
+        self.logger.info(f"Stock substraction succesfull for order {orderId}")
         self.stockSuccess(orderId)        
     
     def performRollback(self, msg):
         items = msg["items"]
+        self.logger.info("performing rollback...")
         try:
             t = self.multiItemAddInMemory(items)
             self.db.mset(t)
         except:
             self.send("RollbackStock", json.dumps(msg))
             return
-        self.logger.debug("Rollback successful")
+        self.logger.info("Rollback successful")
 
     def multiItemSubInMemory(self, items):
         """Might throw when accessing DB"""

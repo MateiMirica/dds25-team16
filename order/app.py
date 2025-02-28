@@ -186,14 +186,17 @@ def checkout(order_id: str):
 def process_response_stock(response: str):
     status = json.loads(response)
     if status["status"] is True:
-        order_id = status["OrderId"]
+        app.logger.info("Stock substraction successful")
+        order_id = status["orderId"]
         # can be avoided if payment details are included in stock update
         order_entry: OrderValue = get_order_from_db(order_id)
         payment = dict()
         payment["orderId"] = order_id
         payment["userId"] = order_entry.user_id
-        payment["cost"] = order_entry.total_cost
+        payment["amount"] = order_entry.total_cost
         send_to_kafka('UpdatePayment', json.dumps(payment))
+    else:
+        app.logger.info("Stock substraction failed")
 
 def process_response_payment(response: str):
     status = json.loads(response)
@@ -202,9 +205,12 @@ def process_response_payment(response: str):
     if status["status"] is True:
         order_entry.paid = True
         db.set(order_id, msgpack.encode(order_entry))
+        app.logger.info(f"order {order_id} checkout successful")
     else:
+        app.logger.info("Payment failed, attempting stock rollback...")
         items_quantities = get_items_in_order(order_entry)
         rollback_stock(items_quantities)
+
 def send_to_kafka(topic, data):
     producer.produce(topic, data)
     producer.flush()
