@@ -118,7 +118,7 @@ class StockWorker():
             item_entry: StockValue = self.get_item_from_db(item_id)
             if item_entry == None or item_entry.stock < int(amount):
                 raise StockTransactionError()
-            in_mem_transaction[item_id] = item_entry.stock - int(amount)
+            in_mem_transaction[item_id] = StockValue(item_entry.stock - int(amount), item_entry.price)
         
         return in_mem_transaction
     
@@ -129,6 +129,6 @@ class StockWorker():
             item_entry: StockValue = self.get_item_from_db(item_id)
             if item_entry == None:
                 raise StockTransactionError()
-            in_mem_transaction[item_id] =  item_entry.stock + int(amount)
+            in_mem_transaction[item_id] =  StockValue(item_entry.stock + int(amount), item_entry.price)
         
         return in_mem_transaction
