@@ -26,6 +26,8 @@ services:
   order-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb
+    ports: 
+      - "8001:6379"
 
   stock-service:
     build: ./stock
