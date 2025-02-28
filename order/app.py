@@ -160,42 +160,51 @@ def add_item(order_id: str, item_id: str, quantity: int):
                     status=200)
 
 
-def rollback_stock(removed_items: list[tuple[str, int]]):
-    for item_id, quantity in removed_items:
-        send_post_request(f"{GATEWAY_URL}/stock/add/{item_id}/{quantity}")
+def rollback_stock(removed_items):
+    items = dict()
+    items["items"] = removed_items
+    send_to_kafka('RollbackStock', json.dumps(items))
 
+def get_items_in_order(order_entry: OrderValue):
+    items_quantities: dict[str, int] = defaultdict(int)
+    for item_id, quantity in order_entry.items:
+        items_quantities[item_id] += quantity
+    return items_quantities
 
 @app.post('/checkout/<order_id>')
 def checkout(order_id: str):
     app.logger.debug(f"Checking out {order_id}")
     order_entry: OrderValue = get_order_from_db(order_id)
     # get the quantity per item
-    items_quantities: dict[str, int] = defaultdict(int)
-    for item_id, quantity in order_entry.items:
-        items_quantities[item_id] += quantity
-    # The removed items will contain the items that we already have successfully subtracted stock from
-    # for rollback purposes.
-    removed_items: list[tuple[str, int]] = []
-    for item_id, quantity in items_quantities.items():
-        stock_reply = send_post_request(f"{GATEWAY_URL}/stock/subtract/{item_id}/{quantity}")
-        if stock_reply.status_code != 200:
-            # If one item does not have enough stock we need to rollback
-            rollback_stock(removed_items)
-            abort(400, f'Out of stock on item_id: {item_id}')
-        removed_items.append((item_id, quantity))
-    user_reply = send_post_request(f"{GATEWAY_URL}/payment/pay/{order_entry.user_id}/{order_entry.total_cost}")
-    if user_reply.status_code != 200:
-        # If the user does not have enough credit we need to rollback all the item stock subtractions
-        rollback_stock(removed_items)
-        abort(400, "User out of credit")
-    order_entry.paid = True
-    try:
-        db.set(order_id, msgpack.encode(order_entry))
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    app.logger.debug("Checkout successful")
-    return Response("Checkout successful", status=200)
+    items_quantities = get_items_in_order(order_entry)
+    items = dict()
+    items["orderId"] = order_id
+    items["items"] = items_quantities
+    send_to_kafka('UpdateStock', json.dumps(items))
+    return Response("Checkout accepted", status=202)
 
+def process_response_stock(response: str):
+    status = json.loads(response)
+    if status["status"] is True:
+        order_id = status["OrderId"]
+        # can be avoided if payment details are included in stock update
+        order_entry: OrderValue = get_order_from_db(order_id)
+        payment = dict()
+        payment["orderId"] = order_id
+        payment["userId"] = order_entry.user_id
+        payment["cost"] = order_entry.total_cost
+        send_to_kafka('UpdatePayment', json.dumps(payment))
+
+def process_response_payment(response: str):
+    status = json.loads(response)
+    order_id = status["oderId"]
+    order_entry: OrderValue = get_order_from_db(order_id)
+    if status["status"] is True:
+        order_entry.paid = True
+        db.set(order_id, msgpack.encode(order_entry))
+    else:
+        items_quantities = get_items_in_order(order_entry)
+        rollback_stock(items_quantities)
 def send_to_kafka(topic, data):
     producer.produce(topic, data)
     producer.flush()
@@ -210,7 +219,7 @@ def demo_kafka():
     send_to_kafka('demo_topic', json.dumps(message))
     return jsonify({'status': 'Message sent'}), 200
 
-def consume_messages(consumer):
+def consume_messages(consumer, action):
     while True:
         message = consumer.poll(0.1)
         if message is None:
@@ -218,21 +227,24 @@ def consume_messages(consumer):
         if message.error():
             app.logger.info(f"Consumer error: {message.error()}")
             continue
-        app.logger.info(f"Received message: {message.value().decode('utf-8')}")
+        action(message.value().decode('utf-8'))
 
-def start_consumer_thread(topic):
+def start_consumer_thread(topic, action):
     consumer = create_kafka_consumer(topic)
-    thread = threading.Thread(target=consume_messages, args=(consumer,))
+    thread = threading.Thread(target=consume_messages, args=(consumer,action,))
     thread.daemon = True
     thread.start()
 
+consumer_topics = ['ResponseStock', 'ResponsePayment']
+consumer_actions = [process_response_stock, process_response_payment]
+
 if __name__ == '__main__':
-    start_consumer_thread('demo_topic1')
-    start_consumer_thread('demo_topic2')
+    for i in range(len(consumer_topics)):
+        start_consumer_thread(consumer_topics[i], consumer_actions[i])
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
-    start_consumer_thread('demo_topic1')
-    start_consumer_thread('demo_topic2')
+    for i in range(len(consumer_topics)):
+        start_consumer_thread(consumer_topics[i], consumer_actions[i])
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
