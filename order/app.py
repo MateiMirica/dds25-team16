@@ -4,13 +4,16 @@ import atexit
 import random
 import uuid
 from collections import defaultdict
+import json
 
 import redis
 import requests
 
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
+from confluent_kafka import Producer, Consumer
 
+import threading
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
@@ -24,13 +27,29 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
-
 def close_db_connection():
     db.close()
 
 
 atexit.register(close_db_connection)
 
+
+def create_kafka_producer():
+    conf = {'bootstrap.servers': "kafka:9092"}
+    producer = Producer(**conf)
+    return producer
+
+def create_kafka_consumer(topic):
+    conf = {
+        'bootstrap.servers': "kafka:9092",
+        'group.id': "orders",
+        'auto.offset.reset': 'earliest'
+    }
+    consumer = Consumer(**conf)
+    consumer.subscribe([topic])
+    return consumer
+
+producer = create_kafka_producer()
 
 class OrderValue(Struct):
     paid: bool
@@ -177,10 +196,43 @@ def checkout(order_id: str):
     app.logger.debug("Checkout successful")
     return Response("Checkout successful", status=200)
 
+def send_to_kafka(topic, data):
+    producer.produce(topic, data)
+    producer.flush()
+
+@app.route('/kafka_demo', methods=['POST'])
+def demo_kafka():
+    """ Demo kafka """
+    message = {
+        'message': 'Hello',
+        'from': 'order',
+    }
+    send_to_kafka('demo_topic', json.dumps(message))
+    return jsonify({'status': 'Message sent'}), 200
+
+def consume_messages(consumer):
+    while True:
+        message = consumer.poll(0.1)
+        if message is None:
+            continue
+        if message.error():
+            app.logger.info(f"Consumer error: {message.error()}")
+            continue
+        app.logger.info(f"Received message: {message.value().decode('utf-8')}")
+
+def start_consumer_thread(topic):
+    consumer = create_kafka_consumer(topic)
+    thread = threading.Thread(target=consume_messages, args=(consumer,))
+    thread.daemon = True
+    thread.start()
 
 if __name__ == '__main__':
+    start_consumer_thread('demo_topic1')
+    start_consumer_thread('demo_topic2')
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
+    start_consumer_thread('demo_topic1')
+    start_consumer_thread('demo_topic2')
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
