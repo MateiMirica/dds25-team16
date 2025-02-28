@@ -4,13 +4,17 @@ import redis
 import json
 from msgspec import msgpack, Struct
 
-class PaymentDBError(Exception):
+class StockDBError(Exception):
     """Custom exception for db errors."""
-    
-class UserValue(Struct):
-    credit: int
 
-class PaymentWorker():
+class StockTransactionError(Exception):
+    """Custom exception for stock transaction errors."""
+    
+class StockValue(Struct):
+    stock: int
+    price: int
+
+class StockWorker():
     def __init__(self, logger, db):
         self.producer = self.create_kafka_producer()
         self.logger = logger
@@ -30,7 +34,7 @@ class PaymentWorker():
     def create_kafka_consumer(self, topic):
         conf = {
             'bootstrap.servers': "kafka:9092",
-            'group.id': "payments",
+            'group.id': "stocks",
             'auto.offset.reset': 'earliest'
         }
         consumer = Consumer(**conf)
@@ -54,60 +58,75 @@ class PaymentWorker():
                 self.logger.debug(f"Malformed JSON: {msg.value().decode('utf-8')}")
 
     def start_transaction_consumer_thread(self):
-        consumer = self.create_kafka_consumer("UpdatePayment")
+        consumer = self.create_kafka_consumer("UpdateStock")
         thread = threading.Thread(target=self.consume_messages, args=(consumer,self.performTransaction,))
         thread.daemon = True
         thread.start()
     
     def start_rollback_consumer_thread(self):
-        consumer = self.create_kafka_consumer("RollbackPayment")
+        consumer = self.create_kafka_consumer("RollbackStock")
         thread = threading.Thread(target=self.consume_messages, args=(consumer,self.performRollback,))
         thread.daemon = True
         thread.start()
 
 
-
-
-    def get_user_from_db(self, user_id: str) -> UserValue | None:
+    def get_item_from_db(self, item_id: str) -> StockValue | None:
+        # get serialized data
         try:
-            # get serialized data
-            entry: bytes = self.db.get(user_id)
+            entry: bytes = self.db.get(item_id)
         except redis.exceptions.RedisError:
-            raise PaymentDBError("can't reach Redis")
+            raise StockDBError()
         # deserialize data if it exists else return null
-        entry: UserValue | None = msgpack.decode(entry, type=UserValue) if entry else None
+        entry: StockValue | None = msgpack.decode(entry, type=StockValue) if entry else None
         return entry
 
-    def paymentSuccess(self, orderId):
+    def stockSuccess(self, orderId):
         data = {'orderId': orderId, 'status': True} 
-        self.send("ResponsePayment", json.dumps(data))
+        self.send("ResponseStock", json.dumps(data))
     
-    def paymentFailed(self, orderId):
+    def stockFailed(self, orderId):
         data = {'orderId': orderId, 'status': True} 
-        self.send("ResponsePayment", json.dumps(data))
+        self.send("ResponseStock", json.dumps(data))
 
     def performTransaction(self, msg):
-        """This method should be refactored. It currently does too much"""
-        orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
-        self.logger.debug(f"Removing {amount} credit from user: {userId}")
+        orderId, items = msg["orderId"], msg["items"]
         try:
-            user_entry: UserValue = self.get_user_from_db(userId)
-            if user_entry == None: #no user with this key
-                self.paymentFailed(orderId)
+            t = self.multiItemSubInMemory(items)
+            self.db.mset(t)
         except:
-            self.paymentFailed(orderId)
-            return 
-        
-        # update credit, serialize and update database
-        user_entry.credit -= int(amount)
-        if user_entry.credit < 0:
-            self.paymentFailed(orderId)
-        try:
-            self.db.set(userId, msgpack.encode(user_entry))
-        except redis.exceptions.RedisError:
-            self.paymentFailed(orderId)
-
-        self.paymentSuccess(orderId)
+            self.stockFailed(orderId)
+            return
+        self.logger.debug(f"Stock substraction succesfull for order {orderId}")
+        self.stockSuccess(orderId)        
     
     def performRollback(self, msg):
-        pass
+        items = msg["items"]
+        try:
+            t = self.multiItemAddInMemory(items)
+            self.db.mset(t)
+        except:
+            self.send("RollbackStock", json.dumps(msg))
+            return
+        self.logger.debug("Rollback successful")
+
+    def multiItemSubInMemory(self, items):
+        """Might throw when accessing DB"""
+        in_mem_transaction = dict()
+        for item_id, amount in items.items():
+            item_entry: StockValue = self.get_item_from_db(item_id)
+            if item_entry == None or item_entry.stock < int(amount):
+                raise StockTransactionError()
+            in_mem_transaction.put(item_id, item_entry.stock - int(amount))
+        
+        return in_mem_transaction
+    
+    def multiItemAddInMemory(self, items):
+        """Might throw when accessing DB"""
+        in_mem_transaction = dict()
+        for item_id, amount in items.items():
+            item_entry: StockValue = self.get_item_from_db(item_id)
+            if item_entry == None:
+                raise StockTransactionError()
+            in_mem_transaction.put(item_id, item_entry.stock + int(amount))
+        
+        return in_mem_transaction

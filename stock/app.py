@@ -9,7 +9,7 @@ import redis
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
 from confluent_kafka import Producer, Consumer
-
+from stock_worker import StockValue, StockWorker
 import threading
 
 DB_ERROR_STR = "DB error"
@@ -27,28 +27,7 @@ def close_db_connection():
 
 
 atexit.register(close_db_connection)
-
-def create_kafka_producer():
-    conf = {'bootstrap.servers': "kafka:9092"}
-    producer = Producer(**conf)
-    return producer
-
-def create_kafka_consumer(topic):
-    conf = {
-        'bootstrap.servers': "kafka:9092",
-        'group.id': "stocks",
-        'auto.offset.reset': 'earliest'
-    }
-    consumer = Consumer(**conf)
-    consumer.subscribe([topic])
-    return consumer
-
-producer = create_kafka_producer()
-
-class StockValue(Struct):
-    stock: int
-    price: int
-
+sstockWorker = StockWorker(app.logger, db)
 
 def get_item_from_db(item_id: str) -> StockValue | None:
     # get serialized data
@@ -127,41 +106,9 @@ def remove_stock(item_id: str, amount: int):
         return abort(400, DB_ERROR_STR)
     return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
 
-def send_to_kafka(topic, data):
-    producer.produce(topic, data)
-    producer.flush()
-
-@app.route('/kafka_demo', methods=['POST'])
-def demo_kafka():
-    """ Demo kafka """
-    message = {
-        'message': 'Hello',
-        'from': 'stock',
-    }
-    send_to_kafka('demo_topic2', json.dumps(message))
-    return jsonify({'status': 'Message sent'}), 200
-
-def consume_messages(consumer):
-    while True:
-        message = consumer.poll(0.1)
-        if message is None:
-            continue
-        if message.error():
-            app.logger.info(f"Consumer error: {message.error()}")
-            continue
-        app.logger.info(f"Received message: {message.value().decode('utf-8')}")
-
-def start_consumer_thread(topic):
-    consumer = create_kafka_consumer(topic)
-    thread = threading.Thread(target=consume_messages, args=(consumer,))
-    thread.daemon = True
-    thread.start()
-
 if __name__ == '__main__':
-    start_consumer_thread('demo_topic2')
     app.run(host="0.0.0.0", port=8000, debug=True)
 else:
-    start_consumer_thread('demo_topic2')
     gunicorn_logger = logging.getLogger('gunicorn.error')
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
