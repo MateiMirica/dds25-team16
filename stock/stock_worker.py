@@ -85,7 +85,7 @@ class StockWorker():
         self.send("ResponseStock", json.dumps(data))
     
     def stockFailed(self, orderId):
-        data = {'orderId': orderId, 'status': True} 
+        data = {'orderId': orderId, 'status': False}
         self.send("ResponseStock", json.dumps(data))
 
     def performTransaction(self, msg):
