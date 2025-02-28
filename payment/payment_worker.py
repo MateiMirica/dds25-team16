@@ -83,7 +83,7 @@ class PaymentWorker():
         self.send("ResponsePayment", json.dumps(data))
     
     def paymentFailed(self, orderId):
-        data = {'orderId': orderId, 'status': True} 
+        data = {'orderId': orderId, 'status': False}
         self.send("ResponsePayment", json.dumps(data))
 
     def performTransaction(self, msg):
