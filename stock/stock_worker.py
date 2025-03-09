@@ -19,6 +19,7 @@ class StockWorker():
         self.producer = self.create_kafka_producer()
         self.logger = logger
         self.db = db
+        self.retry_count = 5
         self.start_transaction_consumer_thread()
         self.start_rollback_consumer_thread()
 
@@ -91,15 +92,43 @@ class StockWorker():
     def performTransaction(self, msg):
         orderId, items = msg["orderId"], msg["items"]
         try:
-            t = self.multiItemSubInMemory(items)
-            self.db.mset(t)
+            self.add_stock_optimistic(items)
         except Exception as e:
             self.logger.info(str(e))
             self.stockFailed(orderId)
             return
         self.logger.info(f"Stock substraction succesfull for order {orderId}")
-        self.stockSuccess(orderId)        
-    
+        self.stockSuccess(orderId)   
+             
+    def add_stock_optimistic(self, items):
+        for i in range(self.retry_count):
+            try:
+                pipe = self.db.pipeline()
+                for item_id in items:
+                    pipe.watch(item_id)
+
+                curr_stock: dict[str, StockValue] = {}
+                for item_id, amount in items.items():
+                    data = pipe.get(item_id)
+                    if data == None:
+                        raise StockTransactionError()
+                    item_stock = msgpack.decode(data, type=StockValue)
+                    if item_stock.stock < amount:
+                        raise StockTransactionError()
+                    curr_stock[item_id] = item_stock
+                
+                pipe.multi()
+                for item_id, amount in items.items():
+                    new_stock = curr_stock[item_id].stock - amount
+                    pipe.set(item_id, msgpack.encode(StockValue(stock = new_stock, price = curr_stock[item_id].price)))
+
+                pipe.execute()
+                return
+            
+            except redis.WatchError:
+                continue
+
+
     def performRollback(self, msg):
         items = msg["items"]
         self.logger.info("performing rollback...")
