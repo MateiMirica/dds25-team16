@@ -160,7 +160,7 @@ def add_item(order_id: str, item_id: str, quantity: int):
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
-                    status=200)
+                    status_code=200)
 
 
 def rollback_stock(removed_items):
@@ -184,7 +184,7 @@ def checkout(order_id: str):
     items["orderId"] = order_id
     items["items"] = items_quantities
     send_to_kafka('UpdateStock', json.dumps(items))
-    return Response("Checkout accepted", status=202)
+    return Response("Checkout accepted", status_code=202)
 
 def process_response_stock(response: str):
     status = json.loads(response)

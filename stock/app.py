@@ -92,7 +92,7 @@ def add_stock(item_id: str, amount: int):
         db.set(item_id, msgpack.encode(item_entry))
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
+    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status_code=200)
 
 
 @app.post('/subtract/{item_id}/{amount}')
@@ -107,7 +107,7 @@ def remove_stock(item_id: str, amount: int):
         db.set(item_id, msgpack.encode(item_entry))
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status=200)
+    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status_code=200)
 
 if __name__ == '__main__':
     uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)

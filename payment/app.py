@@ -93,7 +93,7 @@ def add_credit(user_id: str, amount: int):
         db.set(user_id, msgpack.encode(user_entry))
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status=200)
+    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status_code=200)
 
 
 @app.post('/pay/{user_id}/{amount}')
@@ -113,7 +113,7 @@ def remove_credit(user_id: str, amount: int):
         db.set(user_id, msgpack.encode(user_entry))
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status=200)
+    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status_code=200)
 
 
 
