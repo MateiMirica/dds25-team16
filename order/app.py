@@ -5,6 +5,7 @@ import random
 import uuid
 from collections import defaultdict
 import json
+from unittest import case
 
 import redis
 import requests
@@ -167,17 +168,17 @@ def add_item(order_id: str, item_id: str, quantity: int):
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
                     status_code=200)
 
-def rollback_payment(user_id, total_cost):
-    msg = {
-        "userId": user_id,
-        "amount": total_cost
-    }
-    send_to_kafka('RollbackPayment', json.dumps(msg))
+# def rollback_payment(user_id, total_cost):
+#     msg = {
+#         "userId": user_id,
+#         "amount": total_cost
+#     }
+#     send_to_kafka('RollbackPayment', json.dumps(msg))
 
-def rollback_stock(removed_items):
-    items = dict()
-    items["items"] = removed_items
-    send_to_kafka('RollbackStock', json.dumps(items))
+# def rollback_stock(removed_items):
+#     items = dict()
+#     items["items"] = removed_items
+#     send_to_kafka('RollbackStock', json.dumps(items))
 
 def get_items_in_order(order_entry: OrderValue):
     items_quantities: dict[str, int] = defaultdict(int)
@@ -188,16 +189,29 @@ def get_items_in_order(order_entry: OrderValue):
 #store order_ids which i handle currently
 pending_orders = {}
 
+def create_message_and_send(topic: str, order_id: str, order_entry: OrderValue):
+    items_quantities = get_items_in_order(order_entry)
+    msg = dict()
+    match topic:
+        case 'UpdateStock':
+            msg["orderId"] = order_id
+            msg["items"] = items_quantities
+        case 'UpdatePayment':
+            msg["orderId"] = order_id
+            msg["userId"] = order_entry.user_id
+            msg["amount"] = order_entry.total_cost
+        case 'RollbackPayment':
+            msg["userId"] = order_entry.user_id
+            msg["amount"] = order_entry.total_cost
+        case 'RollbackStock':
+            msg["items"] = items_quantities
+    send_to_kafka(topic, json.dumps(msg))
+
 @app.post('/checkout/{order_id}')
 async def checkout(order_id: str):
     logging.debug(f"Checking out {order_id}")
     order_entry: OrderValue = get_order_from_db(order_id)
-    # get the quantity per item
-    items_quantities = get_items_in_order(order_entry)
-    items = dict()
-    items["orderId"] = order_id
-    items["items"] = items_quantities
-    send_to_kafka('UpdateStock', json.dumps(items))
+    create_message_and_send('UpdateStock', order_id, order_entry)
     pending_orders[order_id] = True
 
     try:
@@ -234,14 +248,9 @@ def process_response_stock(response: str):
         logging.info("Stock substraction successful")
         order_entry: OrderValue = get_order_from_db(order_id)
         if order_entry.status != "pending":
-            rollback_stock(get_items_in_order(order_entry))
+            create_message_and_send('RollbackStock', order_id, order_entry)
             return
-        
-        payment = dict()
-        payment["orderId"] = order_id
-        payment["userId"] = order_entry.user_id
-        payment["amount"] = order_entry.total_cost
-        send_to_kafka('UpdatePayment', json.dumps(payment))
+        create_message_and_send('UpdatePayment', order_id, order_entry)
     else:
         logging.info("Stock substraction failed")
         fail_order(order_id)
@@ -254,11 +263,10 @@ def process_response_payment(response: str):
     order_entry: OrderValue = get_order_from_db(order_id)
     if status["status"] is True:
         if order_entry.status != "pending":
-            # rollback both
-            rollback_stock(get_items_in_order(order_entry))
-            rollback_payment(order_entry.user_id, order_entry.total_cost)
+            create_message_and_send('RollbackStock', order_id, order_entry)
+            create_message_and_send('RollbackPayment', order_id, order_entry)
             return
-        
+
         order_entry.paid = True
         order_entry.status = "success"
         db.set(order_id, msgpack.encode(order_entry))
@@ -266,8 +274,7 @@ def process_response_payment(response: str):
     else:
         logging.info("Payment failed, attempting stock rollback...")
         fail_order(order_id)
-        items_quantities = get_items_in_order(order_entry)
-        rollback_stock(items_quantities)
+        create_message_and_send('RollbackStock', order_id, order_entry)
     pending_orders.pop(order_id, None)
 
 def send_to_kafka(topic, data):
@@ -286,7 +293,7 @@ def demo_kafka():
 
 def consume_messages(consumer, action):
     while True:
-        message = consumer.poll(0.1)
+        message = consumer.poll(0.01)
         if message is None:
             continue
         if message.error():
