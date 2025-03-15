@@ -114,4 +114,23 @@ class PaymentWorker():
         self.paymentSuccess(orderId)
     
     def performRollback(self, msg):
-        pass
+        userId, amount = msg["userId"], msg["amount"]
+        self.logger.debug(f"Adding {amount} credit to user: {userId}")
+        try:
+            user_entry: UserValue = self.get_user_from_db(userId)
+        except:
+            self.send('RollbackPayment', json.dumps(msg)) # retry
+            return
+        if user_entry == None: #no user with this key
+                raise Exception(f"No user with id {userId}")
+        
+        user_entry.credit += int(amount)
+        try:
+            self.db.set(userId, msgpack.encode(user_entry))
+        except redis.exceptions.RedisError:
+            self.send('RollbackPayment', json.dumps(msg)) #retry
+            return
+
+        self.logger.info(f"Payment rollback successful for user {userId}")
+
+
