@@ -148,12 +148,13 @@ async def checkout(order_id: str):
         order: OrderValue = await orderWorker.checkout(order_id)
         # logger.warning(f"Order: {order}")
         if order.paid:
+            logger.info(f"CHECKOUT PAID {order_id}")
             return Response("Checkout successful", status_code=200)
         else:
-            logger.info("CHECKOUT NOT PAID")
+            logger.info(f"CHECKOUT NOT PAID {order_id}")
             return Response("Checkout unsuccessful", status_code=400)
     except TimeoutException:
-        logger.info("TIMEOUT")
+        logger.info(f"TIMEOUT {order_id}")
         return Response("Checkout TIMEOUT", status_code=400)
 
 

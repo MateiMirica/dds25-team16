@@ -104,21 +104,6 @@ class OrderWorker():
 
     def process_response_stock(self, status):
         order_id = status["orderId"]
-
-        if status["status"] is True:
-            self.logger.info("Stock substraction successful")
-            order_entry: OrderValue = self.get_order_from_db(order_id)
-            if order_entry.status != "pending":
-                self.create_message_and_send('RollbackStock', order_id, order_entry)
-                return
-            self.create_message_and_send('UpdatePayment', order_id, order_entry)
-        else:
-            self.logger.info("Stock substraction failed")
-            self.fail_order(order_id)
-            self.pending_orders.pop(order_id, None)
-
-    def process_response_payment(self, status):
-        order_id = status["orderId"]
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if status["status"] is True:
             if order_entry.status != "pending":
@@ -132,10 +117,25 @@ class OrderWorker():
             self.logger.info(f"Order entry {self.get_order_from_db(order_id)}")
             self.logger.info(f"order {order_id} checkout successful")
         else:
-            self.logger.info("Payment failed, attempting stock rollback...")
+            self.logger.info("Stock failed, attempting payment rollback...")
             self.fail_order(order_id)
-            self.create_message_and_send('RollbackStock', order_id, order_entry)
+            self.create_message_and_send('RollbackPayment', order_id, order_entry)
         self.pending_orders.pop(order_id, None)
+
+    def process_response_payment(self, status):
+        order_id = status["orderId"]
+
+        if status["status"] is True:
+            self.logger.info("Payment substraction successful")
+            order_entry: OrderValue = self.get_order_from_db(order_id)
+            if order_entry.status != "pending":
+                self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                return
+            self.create_message_and_send('UpdateStock', order_id, order_entry)
+        else:
+            self.logger.info("Payment substraction failed")
+            self.fail_order(order_id)
+            self.pending_orders.pop(order_id, None)
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -146,7 +146,7 @@ class OrderWorker():
     async def checkout(self, order_id: str):
         self.logger.debug(f"Checking out {order_id}")
         order_entry: OrderValue = self.get_order_from_db(order_id)
-        self.create_message_and_send('UpdateStock', order_id, order_entry)
+        self.create_message_and_send('UpdatePayment', order_id, order_entry)
         self.pending_orders[order_id] = True
 
         await self.await_order(order_id)
