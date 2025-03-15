@@ -3,6 +3,7 @@ import threading
 import redis
 import json
 from msgspec import msgpack, Struct
+from confluent_kafka.admin import AdminClient, NewTopic
 
 class StockDBError(Exception):
     """Custom exception for db errors."""
@@ -16,6 +17,18 @@ class StockValue(Struct):
 
 class StockWorker():
     def __init__(self, logger, db):
+        def create_topic(topic_name):
+            broker_client = AdminClient({"bootstrap.servers": 'kafka:9092'})
+            new_topic = NewTopic(topic=topic_name, num_partitions=1, replication_factor=1)
+            create_result = broker_client.create_topics([new_topic])
+            for topic_name, future in create_result.items():
+                assert future.exception() is None
+            print(f"created topic {topic_name}")
+
+        all_topics = ['ResponseStock', 'RollbackStock', 'UpdateStock']
+        for topic in all_topics:
+            create_topic(topic)
+
         self.producer = self.create_kafka_producer()
         self.logger = logger
         self.db = db
