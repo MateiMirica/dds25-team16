@@ -7,6 +7,8 @@ services:
       - "2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - mynetwork
   kafka:
     image: confluentinc/cp-kafka:7.2.0
     ports:
@@ -20,6 +22,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     depends_on:
       - zookeeper
+    networks:
+      - mynetwork
   gateway:
     image: nginx:1.25-bookworm
     volumes:
@@ -30,6 +34,8 @@ services:
       - order-service
       - stock-service
       - payment-service
+    networks:
+      - mynetwork
 
   order-service:
     build: ./order
@@ -37,42 +43,61 @@ services:
     environment:
       - GATEWAY_URL=http://gateway:80
     command: uvicorn app:app --host 0.0.0.0 --port 5000
+    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "--timeout", "30", "--log-level=info", "app:app" ]
     env_file:
       - env/order_redis.env
     depends_on:
       - order-db
       - kafka
+    networks:
+      - mynetwork
 
   order-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb
-    ports: 
+    ports:
       - "8001:6379"
+    networks:
+      - mynetwork
 
   stock-service:
     build: ./stock
     image: stock:latest
     command: uvicorn app:app --host 0.0.0.0 --port 5000
+    command: ["bash", "./wait-for-it.sh", "kafka", "9092", "--", "gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "--timeout", "30", "--log-level=info", "app:app"]
     env_file:
       - env/stock_redis.env
     depends_on:
       - stock-db
       - kafka
+    networks:
+      - mynetwork
 
   stock-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb
+    networks:
+      - mynetwork
 
   payment-service:
     build: ./payment
     image: user:latest
     command: uvicorn app:app --host 0.0.0.0 --port 5000
+    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "gunicorn", "-b", "0.0.0.0:5000", "-w", "2", "--timeout", "30", "--log-level=info", "app:app" ]
     env_file:
       - env/payment_redis.env
     depends_on:
       - payment-db
       - kafka
+    networks:
+      - mynetwork
 
   payment-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
+    driver: bridge

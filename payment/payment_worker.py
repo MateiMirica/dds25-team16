@@ -3,6 +3,7 @@ import threading
 import redis
 import json
 from msgspec import msgpack, Struct
+from confluent_kafka.admin import AdminClient, NewTopic
 
 class PaymentDBError(Exception):
     """Custom exception for db errors."""

@@ -18,6 +18,7 @@ from confluent_kafka import Producer, Consumer
 from errors import TimeoutException
 
 import threading
+from order_worker import OrderWorker, OrderValue
 import asyncio, time
 
 DB_ERROR_STR = "DB error"
@@ -37,48 +38,9 @@ def close_db_connection():
 
 
 atexit.register(close_db_connection)
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-def create_kafka_producer():
-    conf = {'bootstrap.servers': "kafka:9092"}
-    producer = Producer(**conf)
-    return producer
-
-def create_kafka_consumer(topic):
-    conf = {
-        'bootstrap.servers': "kafka:9092",
-        'group.id': "orders",
-        'auto.offset.reset': 'earliest'
-    }
-    consumer = Consumer(**conf)
-    consumer.subscribe([topic])
-    return consumer
-
-producer = create_kafka_producer()
-
-class OrderValue(Struct):
-    paid: bool
-    status: str 
-    items: list[tuple[str, int]]
-    user_id: str
-    total_cost: int
-
-
-def get_order_from_db(order_id: str) -> OrderValue | None:
-    try:
-        # get serialized data
-        entry: bytes = db.get(order_id)
-    except redis.exceptions.RedisError:
-        raise HTTPException(400, DB_ERROR_STR)
-    # deserialize data if it exists else return null
-    entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None
-    if entry is None:
-        # if order does not exist in the database; abort
-        raise HTTPException(400, f"Order: {order_id} not found!")
-    return entry
-
+orderWorker = OrderWorker(logger, db)
 
 @app.post('/create/{user_id}')
 def create_order(user_id: str):
@@ -121,7 +83,7 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
 
 @app.get('/find/{order_id}')
 def find_order(order_id: str):
-    order_entry: OrderValue = get_order_from_db(order_id)
+    order_entry: OrderValue = orderWorker.get_order_from_db(order_id)
     return {
         "order_id": order_id,
         "status": order_entry.status,
@@ -130,7 +92,7 @@ def find_order(order_id: str):
         "user_id": order_entry.user_id,
         "total_cost": order_entry.total_cost
     }
-    
+
 
 
 def send_post_request(url: str):
@@ -153,7 +115,7 @@ def send_get_request(url: str):
 
 @app.post('/addItem/{order_id}/{item_id}/{quantity}')
 def add_item(order_id: str, item_id: str, quantity: int):
-    order_entry: OrderValue = get_order_from_db(order_id)
+    order_entry: OrderValue = orderWorker.get_order_from_db(order_id)
     item_reply = send_get_request(f"{GATEWAY_URL}/stock/find/{item_id}")
     if item_reply.status_code != 200:
         # Request failed because item does not exist
@@ -207,22 +169,27 @@ def create_message_and_send(topic: str, order_id: str, order_entry: OrderValue):
             msg["items"] = items_quantities
     send_to_kafka(topic, json.dumps(msg))
 
-@app.post('/checkout/{order_id}')
-async def checkout(order_id: str):
-    logging.debug(f"Checking out {order_id}")
-    order_entry: OrderValue = get_order_from_db(order_id)
-    create_message_and_send('UpdateStock', order_id, order_entry)
-    pending_orders[order_id] = True
+@app.post('/checkout/<order_id>')
+def checkout(order_id: str):
+    orderWorker.checkout(order_id)
+    return Response("Checkout accepted", status=202)
 
-    try:
-        await await_order(order_id)
-        order: OrderValue = get_order_from_db(order_id)
-        if order.paid:
-            return Response("Checkout successful", status_code=200)
-        else:
-            return Response("Checkout unsuccessful", status_code=400)
-    except TimeoutException:
-        return Response("Checkout TIMEDOUT", status_code=400)
+# @app.post('/checkout/{order_id}')
+# async def checkout(order_id: str):
+#     logging.debug(f"Checking out {order_id}")
+#     order_entry: OrderValue = get_order_from_db(order_id)
+#     create_message_and_send('UpdateStock', order_id, order_entry)
+#     pending_orders[order_id] = True
+#
+#     try:
+#         await await_order(order_id)
+#         order: OrderValue = get_order_from_db(order_id)
+#         if order.paid:
+#             return Response("Checkout successful", status_code=200)
+#         else:
+#             return Response("Checkout unsuccessful", status_code=400)
+#     except TimeoutException:
+#         return Response("Checkout TIMEDOUT", status_code=400)
 
 
 # Check every 0.001s if the order with order_id is completed
