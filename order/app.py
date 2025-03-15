@@ -208,17 +208,17 @@ async def checkout(order_id: str):
         else:
             return Response("Checkout unsuccessful", status_code=400)
     except TimeoutException:
-        return Response("Checkout unsuccessful", status_code=400)
+        return Response("Checkout TIMEDOUT", status_code=400)
 
 
 # Check every 0.001s if the order with order_id is completed
-async def await_order(order_id: str, timeout=10):
+async def await_order(order_id: str, timeout=5):
     start_time = time.time()
     while time.time() - start_time < timeout:
         if order_id not in pending_orders:
             return
-        asyncio.sleep(0.001)
-    raise Exception(f"timeout for order {order_id} reached")
+        await asyncio.sleep(0.001)
+    raise TimeoutException(f"timeout for order {order_id} reached")
 
 
 def fail_order(order_id):
@@ -245,12 +245,12 @@ def process_response_stock(response: str):
     else:
         logging.info("Stock substraction failed")
         fail_order(order_id)
+        pending_orders.pop(order_id, None)
 
 
 def process_response_payment(response: str):
     status = json.loads(response)
     order_id = status["orderId"]
-    pending_orders.pop(order_id, None)
     order_entry: OrderValue = get_order_from_db(order_id)
     if status["status"] is True:
         if order_entry.status != "pending":
@@ -268,6 +268,7 @@ def process_response_payment(response: str):
         fail_order(order_id)
         items_quantities = get_items_in_order(order_entry)
         rollback_stock(items_quantities)
+    pending_orders.pop(order_id, None)
 
 def send_to_kafka(topic, data):
     producer.produce(topic, data)
