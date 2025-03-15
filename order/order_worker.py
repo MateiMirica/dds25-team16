@@ -30,8 +30,8 @@ class OrderWorker():
         self.logger.info("here!!!!")
         self.pending_orders = {}
         all_topics = ['ResponseStock', 'ResponsePayment', 'RollbackStock', 'RollbackPayment', 'UpdateStock', 'UpdatePayment']
-        # for topic in all_topics:
-        #     self.create_topic(topic)
+        for topic in all_topics:
+            self.create_topic(topic)
 
         self.producer = self.create_kafka_producer()
 
@@ -127,6 +127,7 @@ class OrderWorker():
             order_entry.paid = True
             order_entry.status = "success"
             self.db.set(order_id, msgpack.encode(order_entry))
+            self.logger.info(f"Order entry {self.get_order_from_db(order_id)}")
             self.logger.info(f"order {order_id} checkout successful")
         else:
             self.logger.info("Payment failed, attempting stock rollback...")
@@ -148,6 +149,7 @@ class OrderWorker():
 
         await self.await_order(order_id)
         order: OrderValue = self.get_order_from_db(order_id)
+        self.logger.info(f"Order {order}")
         return order
 
     def get_order_from_db(self, order_id: str) -> OrderValue | None:

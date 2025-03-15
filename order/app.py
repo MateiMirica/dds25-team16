@@ -142,15 +142,18 @@ def add_item(order_id: str, item_id: str, quantity: int):
 #     items["items"] = removed_items
 #     send_to_kafka('RollbackStock', json.dumps(items))
 
-@app.post('/checkout/<order_id>')
+@app.post('/checkout/{order_id}')
 async def checkout(order_id: str):
     try:
         order: OrderValue = await orderWorker.checkout(order_id)
+        # logger.warning(f"Order: {order}")
         if order.paid:
             return Response("Checkout successful", status_code=200)
         else:
+            logger.info("CHECKOUT NOT PAID")
             return Response("Checkout unsuccessful", status_code=400)
     except TimeoutException:
+        logger.info("TIMEOUT")
         return Response("Checkout TIMEOUT", status_code=400)
 
 
