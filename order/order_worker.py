@@ -5,6 +5,7 @@ import json
 from msgspec import msgpack, Struct
 from collections import defaultdict
 from confluent_kafka.admin import AdminClient, NewTopic
+from confluent_kafka import KafkaException, KafkaError
 
 
 class OrderDBError(Exception):
@@ -18,21 +19,15 @@ class OrderValue(Struct):
 
 class OrderWorker():
     def __init__(self, logger, db):
-        def create_topic(topic_name):
-            broker_client = AdminClient({"bootstrap.servers": 'kafka:9092'})
-            new_topic = NewTopic(topic=topic_name, num_partitions=1, replication_factor=1)
-            create_result = broker_client.create_topics([new_topic])
-            for topic_name, future in create_result.items():
-                assert future.exception() is None
-            print(f"created topic {topic_name}")
-
-        # all_topics = ['ResponseStock', 'ResponsePayment', 'RollbackStock', 'RollbackPayment', 'UpdateStock', 'UpdatePayment']
-        # for topic in all_topics:
-        #     create_topic(topic)
-
-        self.producer = self.create_kafka_producer()
         self.logger = logger
         self.db = db
+        self.logger.info("here!!!!")
+
+        all_topics = ['ResponseStock', 'ResponsePayment', 'RollbackStock', 'RollbackPayment', 'UpdateStock', 'UpdatePayment']
+        for topic in all_topics:
+            self.create_topic(topic)
+
+        self.producer = self.create_kafka_producer()
 
         self.start_stock_response_consumer_thread()
         self.start_payment_response_consumer_thread()
@@ -44,14 +39,29 @@ class OrderWorker():
         thread.daemon = True
         thread.start()
 
+    def create_topic(self, topic_name):
+        admin_client = AdminClient({"bootstrap.servers": "kafka:9092"})
+        new_topic = NewTopic(topic_name, num_partitions=1, replication_factor=1)
+        futures = admin_client.create_topics([new_topic])
+        print("Creating topics...")
+
+        for t, future in futures.items():
+            try:
+                future.result()
+                print(f"Topic {t} created successfully.")
+            except KafkaException as e:
+                if e.args[0].code() == KafkaError.TOPIC_ALREADY_EXISTS:
+                    print(f"Topic {t} already exists. Skipping creation.")
+                else:
+                    raise
+
     def start_payment_response_consumer_thread(self):
         consumer = self.create_kafka_consumer("ResponsePayment")
         thread = threading.Thread(target=self.consume_messages, args=(consumer, self.process_response_payment,))
         thread.daemon = True
         thread.start()
 
-    def process_response_stock(self, response: str):
-        status = json.loads(response)
+    def process_response_stock(self, status):
         if status["status"] is True:
             self.logger.info("Stock substraction successful")
             order_id = status["orderId"]
@@ -65,8 +75,7 @@ class OrderWorker():
         else:
             self.logger.info("Stock substraction failed")
 
-    def process_response_payment(self, response: str):
-        status = json.loads(response)
+    def process_response_payment(self, status):
         order_id = status["orderId"]
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if status["status"] is True:
