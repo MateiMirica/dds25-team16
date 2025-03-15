@@ -142,146 +142,19 @@ def add_item(order_id: str, item_id: str, quantity: int):
 #     items["items"] = removed_items
 #     send_to_kafka('RollbackStock', json.dumps(items))
 
-def get_items_in_order(order_entry: OrderValue):
-    items_quantities: dict[str, int] = defaultdict(int)
-    for item_id, quantity in order_entry.items:
-        items_quantities[item_id] += quantity
-    return items_quantities
-
-#store order_ids which i handle currently
-pending_orders = {}
-
-def create_message_and_send(topic: str, order_id: str, order_entry: OrderValue):
-    items_quantities = get_items_in_order(order_entry)
-    msg = dict()
-    match topic:
-        case 'UpdateStock':
-            msg["orderId"] = order_id
-            msg["items"] = items_quantities
-        case 'UpdatePayment':
-            msg["orderId"] = order_id
-            msg["userId"] = order_entry.user_id
-            msg["amount"] = order_entry.total_cost
-        case 'RollbackPayment':
-            msg["userId"] = order_entry.user_id
-            msg["amount"] = order_entry.total_cost
-        case 'RollbackStock':
-            msg["items"] = items_quantities
-    send_to_kafka(topic, json.dumps(msg))
-
 @app.post('/checkout/<order_id>')
-def checkout(order_id: str):
-    orderWorker.checkout(order_id)
-    return Response("Checkout accepted", status=202)
+async def checkout(order_id: str):
+    try:
+        order: OrderValue = await orderWorker.checkout(order_id)
+        if order.paid:
+            return Response("Checkout successful", status_code=200)
+        else:
+            return Response("Checkout unsuccessful", status_code=400)
+    except TimeoutException:
+        return Response("Checkout TIMEOUT", status_code=400)
 
-# @app.post('/checkout/{order_id}')
-# async def checkout(order_id: str):
-#     logging.debug(f"Checking out {order_id}")
-#     order_entry: OrderValue = get_order_from_db(order_id)
-#     create_message_and_send('UpdateStock', order_id, order_entry)
-#     pending_orders[order_id] = True
-#
-#     try:
-#         await await_order(order_id)
-#         order: OrderValue = get_order_from_db(order_id)
-#         if order.paid:
-#             return Response("Checkout successful", status_code=200)
-#         else:
-#             return Response("Checkout unsuccessful", status_code=400)
-#     except TimeoutException:
-#         return Response("Checkout TIMEDOUT", status_code=400)
-
-
-# Check every 0.001s if the order with order_id is completed
-async def await_order(order_id: str, timeout=5):
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        if order_id not in pending_orders:
-            return
-        await asyncio.sleep(0.001)
-    raise TimeoutException(f"timeout for order {order_id} reached")
-
-
-def fail_order(order_id):
-    order_entry: OrderValue = get_order_from_db(order_id)
-    order_entry.status = "failed"
-    db.set(order_id, msgpack.encode(order_entry))
-
-def process_response_stock(response: str):
-    status = json.loads(response)
-    order_id = status["orderId"]
-
-    if status["status"] is True:
-        logging.info("Stock substraction successful")
-        order_entry: OrderValue = get_order_from_db(order_id)
-        if order_entry.status != "pending":
-            create_message_and_send('RollbackStock', order_id, order_entry)
-            return
-        create_message_and_send('UpdatePayment', order_id, order_entry)
-    else:
-        logging.info("Stock substraction failed")
-        fail_order(order_id)
-        pending_orders.pop(order_id, None)
-
-
-def process_response_payment(response: str):
-    status = json.loads(response)
-    order_id = status["orderId"]
-    order_entry: OrderValue = get_order_from_db(order_id)
-    if status["status"] is True:
-        if order_entry.status != "pending":
-            create_message_and_send('RollbackStock', order_id, order_entry)
-            create_message_and_send('RollbackPayment', order_id, order_entry)
-            return
-
-        order_entry.paid = True
-        order_entry.status = "success"
-        db.set(order_id, msgpack.encode(order_entry))
-        logging.info(f"order {order_id} checkout successful")
-    else:
-        logging.info("Payment failed, attempting stock rollback...")
-        fail_order(order_id)
-        create_message_and_send('RollbackStock', order_id, order_entry)
-    pending_orders.pop(order_id, None)
-
-def send_to_kafka(topic, data):
-    producer.produce(topic, data)
-    producer.flush()
-
-@app.route('/kafka_demo', methods=['POST'])
-def demo_kafka():
-    """ Demo kafka """
-    message = {
-        'message': 'Hello',
-        'from': 'order',
-    }
-    send_to_kafka('demo_topic', json.dumps(message))
-    return {'status': 'Message sent'}, 200
-
-def consume_messages(consumer, action):
-    while True:
-        message = consumer.poll(0.01)
-        if message is None:
-            continue
-        if message.error():
-            logging.info(f"Consumer error: {message.error()}")
-            continue
-        action(message.value().decode('utf-8'))
-
-def start_consumer_thread(topic, action):
-    consumer = create_kafka_consumer(topic)
-    thread = threading.Thread(target=consume_messages, args=(consumer,action,))
-    thread.daemon = True
-    thread.start()
-
-consumer_topics = ['ResponseStock', 'ResponsePayment']
-consumer_actions = [process_response_stock, process_response_payment]
 
 if __name__ == '__main__':
-    for i in range(len(consumer_topics)):
-        start_consumer_thread(consumer_topics[i], consumer_actions[i])
     uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
 else:
-    for i in range(len(consumer_topics)):
-        start_consumer_thread(consumer_topics[i], consumer_actions[i])
     logger.info("Starting Order Service with uvicorn")
