@@ -93,6 +93,8 @@ class OrderWorker():
             if order_id not in self.pending_orders:
                 return
             await asyncio.sleep(0.001)
+        self.fail_order(order_id)
+        self.pending_orders.pop(order_id, None)
         raise TimeoutException(f"timeout for order {order_id} reached")
 
     def fail_order(self, order_id):
@@ -177,7 +179,7 @@ class OrderWorker():
     def create_kafka_consumer(self, topic):
         conf = {
             'bootstrap.servers': "kafka:9092",
-            'group.id': "stocks",
+            'group.id': "orders",
             'auto.offset.reset': 'earliest'
         }
         consumer = Consumer(**conf)
