@@ -16,6 +16,42 @@ class PaymentWorker():
         self.router = router
         self.setup_subscriber()
 
+        self.transaction_lua_script = self.db.register_script("""
+        local userId = KEYS[1]
+        local amount = tonumber(ARGV[1])
+
+        local user_data = redis.call("GET", userId)
+        if not user_data then
+            return "USER_NOT_FOUND"
+        end
+
+        local user = cmsgpack.unpack(user_data)
+        if user.credit < amount then
+            return "INSUFFICIENT_FUNDS"
+        end
+
+        user.credit = user.credit - amount
+        redis.call("SET", userId, cmsgpack.pack(user))
+        return "SUCCESS"
+        """)
+
+        self.rollback_lua_script = self.db.register_script("""
+        local userId = KEYS[1]
+        local amount = tonumber(ARGV[1])
+
+        local user_data = redis.call("GET", userId)
+        if not user_data then
+            return "USER_NOT_FOUND"
+        end
+
+        local user = cmsgpack.unpack(user_data)
+
+        user.credit = user.credit + amount
+
+        redis.call("SET", userId, cmsgpack.pack(user))
+        return "SUCCESS"
+        """)
+
     def setup_subscriber(self):
         @self.router.subscriber("UpdatePayment")
         async def consume_update(msg: str):
@@ -46,47 +82,38 @@ class PaymentWorker():
         return json.dumps(data)
 
     def performTransaction(self, msg):
-        """This method should be refactored. It currently does too much"""
         orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
         self.logger.debug(f"Removing {amount} credit from user: {userId}")
+
         try:
-            user_entry: UserValue = self.get_user_from_db(userId)
-            if user_entry == None: #no user with this key
-                return self.paymentFailed(orderId)
-        except:
+            result = self.transaction_lua_script(keys=[userId], args=[amount])
+        except redis.exceptions.RedisError as e:
+            self.logger.error(f"Redis Error: {str(e)}")
             return self.paymentFailed(orderId)
 
-        # update credit, serialize and update database
-        user_entry.credit -= int(amount)
-        if user_entry.credit < 0:
+        # Handle different cases
+        if result == b"USER_NOT_FOUND":
+            return self.paymentFailed(orderId)
+        elif result == b"INSUFFICIENT_FUNDS":
             self.logger.info(f"Not enough balance for user {userId}")
             return self.paymentFailed(orderId)
-        try:
-            self.db.set(userId, msgpack.encode(user_entry))
-        except redis.exceptions.RedisError:
-            return self.paymentFailed(orderId)
+        elif result == b"SUCCESS":
+            self.logger.info(f"Payment successful for order {orderId}")
+            return self.paymentSuccess(orderId)
 
-        self.logger.info(f"Payment successful for order {orderId}")
-        return self.paymentSuccess(orderId)
-    
     def performRollback(self, msg):
         userId, amount = msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
+
         try:
-            user_entry: UserValue = self.get_user_from_db(userId)
-        except:
-            # self.send('RollbackPayment', json.dumps(msg)) # retry
+            result = self.rollback_lua_script(keys=[userId], args=[amount])
+        except redis.exceptions.RedisError as e:
+            self.logger.error(f"Redis Error: {str(e)}")
             return
-        # if user_entry == None: #no user with this key
-        #         raise Exception(f"No user with id {userId}")
-        
-        user_entry.credit += int(amount)
-        try:
-            self.db.set(userId, msgpack.encode(user_entry))
-        except redis.exceptions.RedisError:
-            # self.send('RollbackPayment', json.dumps(msg)) #retry
+
+        # Handle different cases
+        if result == "USER_NOT_FOUND":
+            self.logger.error(f"Rollback failed: No user with id {userId}")
             return
 
         self.logger.info(f"Payment rollback successful for user {userId}")
-
-
