@@ -3,10 +3,6 @@ import os
 import atexit
 import random
 import uuid
-from collections import defaultdict
-import json
-from unittest import case
-
 import redis
 import requests
 import uvicorn
@@ -14,12 +10,9 @@ import uvicorn
 from msgspec import msgpack, Struct
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
-from confluent_kafka import Producer, Consumer
-from errors import TimeoutException
+from faststream.kafka.fastapi import KafkaRouter
 
-import threading
 from order_worker import OrderWorker, OrderValue
-import asyncio, time
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
@@ -27,6 +20,8 @@ REQ_ERROR_STR = "Requests error"
 GATEWAY_URL = os.environ['GATEWAY_URL']
 
 app = FastAPI(title="order-service")
+router = KafkaRouter("kafka:9092")
+app.include_router(router)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
@@ -36,11 +31,10 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
 def close_db_connection():
     db.close()
 
-
 atexit.register(close_db_connection)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-orderWorker = OrderWorker(logger, db)
+orderWorker = OrderWorker(logger, db, router)
 
 @app.post('/create/{user_id}')
 def create_order(user_id: str):
@@ -130,32 +124,16 @@ def add_item(order_id: str, item_id: str, quantity: int):
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
                     status_code=200)
 
-# def rollback_payment(user_id, total_cost):
-#     msg = {
-#         "userId": user_id,
-#         "amount": total_cost
-#     }
-#     send_to_kafka('RollbackPayment', json.dumps(msg))
-
-# def rollback_stock(removed_items):
-#     items = dict()
-#     items["items"] = removed_items
-#     send_to_kafka('RollbackStock', json.dumps(items))
-
 @app.post('/checkout/{order_id}')
 async def checkout(order_id: str):
-    try:
-        order: OrderValue = await orderWorker.checkout(order_id)
-        # logger.warning(f"Order: {order}")
-        if order.paid:
-            logger.info(f"CHECKOUT PAID {order_id}")
-            return Response("Checkout successful", status_code=200)
-        else:
-            logger.info(f"CHECKOUT NOT PAID {order_id}")
-            return Response("Checkout unsuccessful", status_code=400)
-    except TimeoutException:
-        logger.info(f"TIMEOUT {order_id}")
-        return Response("Checkout TIMEOUT", status_code=400)
+    order: OrderValue = await orderWorker.checkout(order_id)
+    # logger.warning(f"Order: {order}")
+    if order.paid:
+        logger.info(f"CHECKOUT PAID {order_id}")
+        return Response("Checkout successful", status_code=200)
+    else:
+        logger.info(f"CHECKOUT NOT PAID {order_id}")
+        return Response("Checkout unsuccessful", status_code=400)
 
 
 if __name__ == '__main__':

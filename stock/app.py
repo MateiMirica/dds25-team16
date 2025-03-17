@@ -10,13 +10,14 @@ import uvicorn
 from msgspec import msgpack, Struct
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
-from confluent_kafka import Producer, Consumer
+from faststream.kafka.fastapi import KafkaRouter
 from stock_worker import StockValue, StockWorker
-import threading
 
 DB_ERROR_STR = "DB error"
 
 app = FastAPI(title="stock-service")
+router = KafkaRouter("kafka:9092")
+app.include_router(router)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
@@ -32,7 +33,7 @@ atexit.register(close_db_connection)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-sstockWorker = StockWorker(logger, db)
+sstockWorker = StockWorker(logger, db, router)
 
 def get_item_from_db(item_id: str) -> StockValue | None:
     # get serialized data

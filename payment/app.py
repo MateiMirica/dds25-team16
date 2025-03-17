@@ -2,7 +2,6 @@ import logging
 import os
 import atexit
 import uuid
-import json
 
 import redis
 import uvicorn
@@ -10,16 +9,17 @@ import uvicorn
 from msgspec import msgpack, Struct
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
+from faststream.kafka.fastapi import KafkaRouter
 
-from confluent_kafka import Producer, Consumer
 
-import threading
 from payment_worker import PaymentWorker, UserValue
 
 DB_ERROR_STR = "DB error"
 
 
 app = FastAPI(title="payment-service")
+router = KafkaRouter("kafka:9092")
+app.include_router(router)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
@@ -35,7 +35,7 @@ atexit.register(close_db_connection)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-paymentWorker = PaymentWorker(logger, db)
+paymentWorker = PaymentWorker(logger, db, router)
 
 @app.post('/create_user')
 def create_user():
