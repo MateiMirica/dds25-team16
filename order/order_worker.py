@@ -59,6 +59,8 @@ class OrderWorker():
     async def checkout(self, order_id: str):
         self.logger.debug(f"Checking out {order_id}")
         order_entry: OrderValue = self.get_order_from_db(order_id)
+        if order_entry.paid is True:
+            return order_entry
 
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
         if status_payment["status"] is True:

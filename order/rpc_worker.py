@@ -3,9 +3,8 @@ from uuid import uuid4
 from asyncio import Future, wait_for
 import json
 from faststream.types import SendableMessage
-from faststream.kafka import KafkaMessage
 from faststream.kafka.fastapi import KafkaRouter
-import pydantic
+
 class RPCWorker:
     def __init__(self, router: KafkaRouter, reply_topic: str) -> None:
         self.responses: dict[str, Future[bytes]] = {}
@@ -38,7 +37,7 @@ class RPCWorker:
 
         try:
             response: bytes = await wait_for(future, timeout=timeout)
-        except TimeoutError:
+        except Exception:
             logging.getLogger().warning("Timedout")
             self.responses.pop(correlation_id, None)
             msg = dict()
