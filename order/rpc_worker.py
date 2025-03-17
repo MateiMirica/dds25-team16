@@ -4,6 +4,7 @@ from asyncio import Future, wait_for
 import json
 from faststream.types import SendableMessage
 from faststream.kafka.fastapi import KafkaRouter
+import uuid
 
 class RPCWorker:
     def __init__(self, router: KafkaRouter, reply_topic: str) -> None:
@@ -11,11 +12,11 @@ class RPCWorker:
         self.router = router
         self.reply_topic = reply_topic
 
-        self.subscriber = router.subscriber(reply_topic)
+        unique_group_id = f"worker_{uuid.uuid4()}"
+        self.subscriber = router.subscriber(reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
 
     def _handle_responses(self, msg) -> None:
-        """Our replies subscriber."""
         message = json.loads(msg)
         if future := self.responses.pop(message["orderId"], None):
             future.set_result(msg)

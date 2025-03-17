@@ -42,7 +42,7 @@ services:
     image: order:latest
     environment:
       - GATEWAY_URL=http://gateway:80
-    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000" ]
+    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/order_redis.env
     depends_on:
@@ -62,7 +62,7 @@ services:
   stock-service:
     build: ./stock
     image: stock:latest
-    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000" ]
+    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/stock_redis.env
     depends_on:
@@ -80,7 +80,7 @@ services:
   payment-service:
     build: ./payment
     image: user:latest
-    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000" ]
+    command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/payment_redis.env
     depends_on:

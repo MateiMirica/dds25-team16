@@ -14,7 +14,11 @@ class PaymentWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.setup_subscriber()
+        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers")
+        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
+        self.update_subscriber(self.consume_update)
+        self.rollback_subscriber(self.consume_rollback)
+
 
         self.transaction_lua_script = self.db.register_script("""
         local userId = KEYS[1]
@@ -52,16 +56,13 @@ class PaymentWorker():
         return "SUCCESS"
         """)
 
-    def setup_subscriber(self):
-        @self.router.subscriber("UpdatePayment")
-        async def consume_update(msg: str):
-            msg = json.loads(msg)
-            return self.performTransaction(msg)
+    def consume_update(self, msg: str):
+        msg = json.loads(msg)
+        return self.performTransaction(msg)
 
-        @self.router.subscriber("RollbackPayment")
-        async def consume_rollback(msg: str):
-            msg = json.loads(msg)
-            self.performRollback(msg)
+    def consume_rollback(self, msg: str):
+        msg = json.loads(msg)
+        self.performRollback(msg)
 
     def get_user_from_db(self, user_id: str) -> UserValue | None:
         try:
@@ -111,7 +112,6 @@ class PaymentWorker():
             self.logger.error(f"Redis Error: {str(e)}")
             return
 
-        # Handle different cases
         if result == "USER_NOT_FOUND":
             self.logger.error(f"Rollback failed: No user with id {userId}")
             return

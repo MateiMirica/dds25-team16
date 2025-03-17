@@ -3,6 +3,7 @@ import json
 from msgspec import msgpack, Struct
 from collections import defaultdict
 from rpc_worker import RPCWorker
+import uuid
 
 
 class OrderDBError(Exception):

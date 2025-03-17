@@ -21,7 +21,8 @@ class StockWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.setup_subscriber()
+        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="update_workers")
+        self.update_subscriber(self.consume_update)
 
         self.transaction_lua_script = self.db.register_script(
             """
@@ -50,11 +51,9 @@ class StockWorker():
             """
         )
 
-    def setup_subscriber(self):
-        @self.router.subscriber("UpdateStock")
-        async def consume_update(msg: str):
-            msg = json.loads(msg)
-            return self.performTransaction(msg)
+    def consume_update(self, msg: str):
+        msg = json.loads(msg)
+        return self.performTransaction(msg)
 
     def stockSuccess(self, orderId):
         data = {'orderId': orderId, 'status': True}
