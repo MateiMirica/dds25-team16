@@ -25,6 +25,7 @@ class OrderWorker():
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", unique_group_id)
         self.stock_worker = RPCWorker(router, "ReplyResponseStock", unique_group_id)
         self.payment_publisher = router.publisher("RollbackPayment")
+        self.stock_publisher = router.publisher("RollbackStock")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -42,15 +43,17 @@ class OrderWorker():
                 response = await self.payment_worker.request(json.dumps(msg), "UpdatePayment", correlation_id=order_id)
                 return json.loads(response)
             case 'RollbackPayment':
+                msg["orderId"] = order_id
                 msg["userId"] = order_entry.user_id
                 msg["amount"] = order_entry.total_cost
                 await self.payment_publisher.publish(json.dumps(msg))
                 return None
-            # case 'RollbackStock':
-            #     items_quantities = self.get_items_in_order(order_entry)
-            #     msg["items"] = items_quantities
-            #     self.send(topic, json.dumps(msg))
-            #     return None
+            case 'RollbackStock':
+                items_quantities = self.get_items_in_order(order_entry)
+                msg["orderId"] = order_id
+                msg["items"] = items_quantities
+                await self.stock_publisher.publish(json.dumps(msg))
+                return None
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -71,7 +74,10 @@ class OrderWorker():
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
             else:
+                if status_stock.get("timeout"):
+                    await self.create_message_and_send('RollbackStock', order_id, order_entry)
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+            
 
         return order_entry
 

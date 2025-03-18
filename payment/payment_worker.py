@@ -18,6 +18,7 @@ class PaymentWorker():
         self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
+        self.transactions_failed = set()
 
 
         self.transaction_lua_script = self.db.register_script("""
@@ -94,8 +95,10 @@ class PaymentWorker():
 
         # Handle different cases
         if result == b"USER_NOT_FOUND":
+            self.transactions_failed.add(orderId)
             return self.paymentFailed(orderId)
         elif result == b"INSUFFICIENT_FUNDS":
+            self.transactions_failed.add(orderId)
             self.logger.info(f"Not enough balance for user {userId}")
             return self.paymentFailed(orderId)
         elif result == b"SUCCESS":
@@ -103,6 +106,11 @@ class PaymentWorker():
             return self.paymentSuccess(orderId)
 
     def performRollback(self, msg):
+        if(msg["orderId"] in self.transactions_failed):
+            self.logger.error(f"Transaction for user {msg['userId']} already failed.")
+            self.transactions_failed.remove(msg["orderId"])
+            return
+
         userId, amount = msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
 
