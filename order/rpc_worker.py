@@ -44,3 +44,6 @@ class RPCWorker:
             return json.dumps(msg).encode("utf-8")
         else:
             return response
+        
+    async def request_no_response(self, data: SendableMessage, topic: str):        
+        await self.router.broker.publish(data, topic)
