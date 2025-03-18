@@ -21,8 +21,9 @@ class OrderWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.payment_worker = RPCWorker(router, "ReplyResponsePayment")
-        self.stock_worker = RPCWorker(router, "ReplyResponseStock")
+        unique_group_id = f"worker_{uuid.uuid4()}"
+        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", unique_group_id)
+        self.stock_worker = RPCWorker(router, "ReplyResponseStock", unique_group_id)
         self.payment_publisher = router.publisher("RollbackPayment")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
@@ -32,7 +33,7 @@ class OrderWorker():
                 items_quantities = self.get_items_in_order(order_entry)
                 msg["orderId"] = order_id
                 msg["items"] = items_quantities
-                response = await self.payment_worker.request(json.dumps(msg), "UpdateStock", correlation_id=order_id)
+                response = await self.stock_worker.request(json.dumps(msg), "UpdateStock", correlation_id=order_id)
                 return json.loads(response)
             case 'UpdatePayment':
                 msg["orderId"] = order_id
