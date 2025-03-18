@@ -3,24 +3,25 @@ import os
 import atexit
 import random
 import uuid
-from collections import defaultdict
-import json
-
 import redis
 import requests
+import uvicorn
 
 from msgspec import msgpack, Struct
-from flask import Flask, jsonify, abort, Response
-from confluent_kafka import Producer, Consumer
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
+from faststream.kafka.fastapi import KafkaRouter
 
-import threading
+from order_worker import OrderWorker, OrderValue
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
 
 GATEWAY_URL = os.environ['GATEWAY_URL']
 
-app = Flask("order-service")
+app = FastAPI(title="order-service")
+router = KafkaRouter("kafka:9092")
+app.include_router(router)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
@@ -30,60 +31,23 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
 def close_db_connection():
     db.close()
 
-
 atexit.register(close_db_connection)
+logging.basicConfig(level=logging.CRITICAL+1, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+orderWorker = OrderWorker(logger, db, router)
 
-
-def create_kafka_producer():
-    conf = {'bootstrap.servers': "kafka:9092"}
-    producer = Producer(**conf)
-    return producer
-
-def create_kafka_consumer(topic):
-    conf = {
-        'bootstrap.servers': "kafka:9092",
-        'group.id': "orders",
-        'auto.offset.reset': 'earliest'
-    }
-    consumer = Consumer(**conf)
-    consumer.subscribe([topic])
-    return consumer
-
-producer = create_kafka_producer()
-
-class OrderValue(Struct):
-    paid: bool
-    items: list[tuple[str, int]]
-    user_id: str
-    total_cost: int
-
-
-def get_order_from_db(order_id: str) -> OrderValue | None:
-    try:
-        # get serialized data
-        entry: bytes = db.get(order_id)
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    # deserialize data if it exists else return null
-    entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None
-    if entry is None:
-        # if order does not exist in the database; abort
-        abort(400, f"Order: {order_id} not found!")
-    return entry
-
-
-@app.post('/create/<user_id>')
+@app.post('/create/{user_id}')
 def create_order(user_id: str):
     key = str(uuid.uuid4())
-    value = msgpack.encode(OrderValue(paid=False, items=[], user_id=user_id, total_cost=0))
+    value = msgpack.encode(OrderValue(paid=False, status="pending", items=[], user_id=user_id, total_cost=0))
     try:
         db.set(key, value)
     except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    return jsonify({'order_id': key})
+        raise HTTPException(400, DB_ERROR_STR)
+    return {'order_id': key}
 
 
-@app.post('/batch_init/<n>/<n_items>/<n_users>/<item_price>')
+@app.post('/batch_init/{n}/{n_items}/{n_users}/{item_price}')
 def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
 
     n = int(n)
@@ -96,6 +60,7 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
         item1_id = random.randint(0, n_items - 1)
         item2_id = random.randint(0, n_items - 1)
         value = OrderValue(paid=False,
+                           status="pending",
                            items=[(f"{item1_id}", 1), (f"{item2_id}", 1)],
                            user_id=f"{user_id}",
                            total_cost=2*item_price)
@@ -106,29 +71,29 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
     try:
         db.mset(kv_pairs)
     except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    return jsonify({"msg": "Batch init for orders successful"})
+        raise HTTPException(400, DB_ERROR_STR)
+    return {"msg": "Batch init for orders successful"}
 
 
-@app.get('/find/<order_id>')
+@app.get('/find/{order_id}')
 def find_order(order_id: str):
-    order_entry: OrderValue = get_order_from_db(order_id)
-    return jsonify(
-        {
-            "order_id": order_id,
-            "paid": order_entry.paid,
-            "items": order_entry.items,
-            "user_id": order_entry.user_id,
-            "total_cost": order_entry.total_cost
-        }
-    )
+    order_entry: OrderValue = orderWorker.get_order_from_db(order_id)
+    return {
+        "order_id": order_id,
+        "status": order_entry.status,
+        "paid": order_entry.paid,
+        "items": order_entry.items,
+        "user_id": order_entry.user_id,
+        "total_cost": order_entry.total_cost
+    }
+
 
 
 def send_post_request(url: str):
     try:
         response = requests.post(url)
     except requests.exceptions.RequestException:
-        abort(400, REQ_ERROR_STR)
+        raise HTTPException(400, REQ_ERROR_STR)
     else:
         return response
 
@@ -137,102 +102,41 @@ def send_get_request(url: str):
     try:
         response = requests.get(url)
     except requests.exceptions.RequestException:
-        abort(400, REQ_ERROR_STR)
+        raise HTTPException(400, REQ_ERROR_STR)
     else:
         return response
 
 
-@app.post('/addItem/<order_id>/<item_id>/<quantity>')
+@app.post('/addItem/{order_id}/{item_id}/{quantity}')
 def add_item(order_id: str, item_id: str, quantity: int):
-    order_entry: OrderValue = get_order_from_db(order_id)
+    order_entry: OrderValue = orderWorker.get_order_from_db(order_id)
     item_reply = send_get_request(f"{GATEWAY_URL}/stock/find/{item_id}")
     if item_reply.status_code != 200:
         # Request failed because item does not exist
-        abort(400, f"Item: {item_id} does not exist!")
+        raise HTTPException(400, f"Item: {item_id} does not exist!")
     item_json: dict = item_reply.json()
     order_entry.items.append((item_id, int(quantity)))
     order_entry.total_cost += int(quantity) * item_json["price"]
     try:
         db.set(order_id, msgpack.encode(order_entry))
     except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
+        raise HTTPException(400, DB_ERROR_STR)
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
-                    status=200)
+                    status_code=200)
 
+@app.post('/checkout/{order_id}')
+async def checkout(order_id: str):
+    order: OrderValue = await orderWorker.checkout(order_id)
+    # logger.warning(f"Order: {order}")
+    if order.paid:
+        logger.info(f"CHECKOUT PAID {order_id}")
+        return Response("Checkout successful", status_code=200)
+    else:
+        logger.info(f"CHECKOUT NOT PAID {order_id}")
+        return Response("Checkout unsuccessful", status_code=400)
 
-def rollback_stock(removed_items: list[tuple[str, int]]):
-    for item_id, quantity in removed_items:
-        send_post_request(f"{GATEWAY_URL}/stock/add/{item_id}/{quantity}")
-
-
-@app.post('/checkout/<order_id>')
-def checkout(order_id: str):
-    app.logger.debug(f"Checking out {order_id}")
-    order_entry: OrderValue = get_order_from_db(order_id)
-    # get the quantity per item
-    items_quantities: dict[str, int] = defaultdict(int)
-    for item_id, quantity in order_entry.items:
-        items_quantities[item_id] += quantity
-    # The removed items will contain the items that we already have successfully subtracted stock from
-    # for rollback purposes.
-    removed_items: list[tuple[str, int]] = []
-    for item_id, quantity in items_quantities.items():
-        stock_reply = send_post_request(f"{GATEWAY_URL}/stock/subtract/{item_id}/{quantity}")
-        if stock_reply.status_code != 200:
-            # If one item does not have enough stock we need to rollback
-            rollback_stock(removed_items)
-            abort(400, f'Out of stock on item_id: {item_id}')
-        removed_items.append((item_id, quantity))
-    user_reply = send_post_request(f"{GATEWAY_URL}/payment/pay/{order_entry.user_id}/{order_entry.total_cost}")
-    if user_reply.status_code != 200:
-        # If the user does not have enough credit we need to rollback all the item stock subtractions
-        rollback_stock(removed_items)
-        abort(400, "User out of credit")
-    order_entry.paid = True
-    try:
-        db.set(order_id, msgpack.encode(order_entry))
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    app.logger.debug("Checkout successful")
-    return Response("Checkout successful", status=200)
-
-def send_to_kafka(topic, data):
-    producer.produce(topic, data)
-    producer.flush()
-
-@app.route('/kafka_demo', methods=['POST'])
-def demo_kafka():
-    """ Demo kafka """
-    message = {
-        'message': 'Hello',
-        'from': 'order',
-    }
-    send_to_kafka('demo_topic', json.dumps(message))
-    return jsonify({'status': 'Message sent'}), 200
-
-def consume_messages(consumer):
-    while True:
-        message = consumer.poll(0.1)
-        if message is None:
-            continue
-        if message.error():
-            app.logger.info(f"Consumer error: {message.error()}")
-            continue
-        app.logger.info(f"Received message: {message.value().decode('utf-8')}")
-
-def start_consumer_thread(topic):
-    consumer = create_kafka_consumer(topic)
-    thread = threading.Thread(target=consume_messages, args=(consumer,))
-    thread.daemon = True
-    thread.start()
 
 if __name__ == '__main__':
-    start_consumer_thread('demo_topic1')
-    start_consumer_thread('demo_topic2')
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
 else:
-    start_consumer_thread('demo_topic1')
-    start_consumer_thread('demo_topic2')
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)
+    logger.info("Starting Order Service with uvicorn")
