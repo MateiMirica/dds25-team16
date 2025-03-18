@@ -24,8 +24,6 @@ class OrderWorker():
         unique_group_id = f"worker_{uuid.uuid4()}"
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", unique_group_id)
         self.stock_worker = RPCWorker(router, "ReplyResponseStock", unique_group_id)
-        # self.payment_publisher = router.publisher("RollbackPayment")
-        # self.stock_publisher = router.publisher("RollbackStock")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -47,13 +45,12 @@ class OrderWorker():
                 msg["userId"] = order_entry.user_id
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
-                # await self.payment_publisher.publish(json.dumps(msg))
                 return None
             case 'RollbackStock':
                 items_quantities = self.get_items_in_order(order_entry)
                 msg["orderId"] = order_id
                 msg["items"] = items_quantities
-                await self.stock_publisher.publish(json.dumps(msg))
+                await self.stock_worker.request_no_response(json.dumps(msg), "RollbackStock")
                 return None
 
     def get_items_in_order(self, order_entry: OrderValue):
