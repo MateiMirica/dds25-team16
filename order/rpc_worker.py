@@ -27,6 +27,7 @@ class RPCWorker:
         timeout: float = 10.0,
     ) -> bytes:
         future = self.responses[correlation_id] = Future[bytes]()
+        # print(len(self.responses))
 
         await self.router.broker.publish(
             data, topic,
@@ -40,6 +41,7 @@ class RPCWorker:
             logging.getLogger().warning("Timedout")
             self.responses.pop(correlation_id, None)
             msg = dict()
+            print("timeout")
             msg["status"] = False
             return json.dumps(msg).encode("utf-8")
         else:
