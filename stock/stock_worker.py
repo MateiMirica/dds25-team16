@@ -25,7 +25,7 @@ class StockWorker():
         self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="update_workers")
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
-        self.transactions_failed = set()
+        # self.transactions_failed = set()
 
         self.transaction_lua_script = self.db.register_script(
             """
@@ -84,21 +84,15 @@ class StockWorker():
         msg = json.loads(msg)
         return self.performTransaction(msg)
 
-    def stockSuccess(self, orderId):
-        data = {'orderId': orderId, 'status': True}
-        return json.dumps(data)
+    def stockSuccess(self, msg):
+        msg["status"] = True
+        return json.dumps(msg)
 
-    def stockFailed(self, orderId):
-        data = {'orderId': orderId, 'status': False}
-        return json.dumps(data)
+    def stockFailed(self, msg):
+        msg["status"] = False
+        return json.dumps(msg)
     
     def rollbackTransaction(self, msg):
-
-        if(msg["orderId"] in self.transactions_failed):
-            self.logger.error(f"Transaction for order {msg['orderId']} already failed.")
-            self.transactions_failed.remove(msg["orderId"])
-            return
-
         orderId, items = msg["orderId"], msg["items"]
         keys = []
         args = []
@@ -133,18 +127,16 @@ class StockWorker():
             result = self.transaction_lua_script(keys=keys, args=args)
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
-            return self.stockFailed(orderId)
+            return self.stockFailed(msg)
 
         if result == b"ITEM_NOT_FOUND":
             self.logger.error("One or more items were not found during stock update.")
-            self.transactions_failed.add(orderId)
-            return self.stockFailed(orderId)
+            return self.stockFailed(msg)
         elif result == b"INSUFFICIENT_STOCK":
             self.logger.info("Insufficient stock available for one or more items.")
-            self.transactions_failed.add(orderId)
-            return self.stockFailed(orderId)
+            return self.stockFailed(msg)
         elif result == b"SUCCESS":
             self.logger.info(f"Stock subtraction successful for order {orderId}")
-            return self.stockSuccess(orderId)
+            return self.stockSuccess(msg)
 
-        return self.stockFailed(orderId)
+        return self.stockFailed(msg)

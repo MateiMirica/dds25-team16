@@ -3,7 +3,7 @@ import json
 from msgspec import msgpack, Struct
 from collections import defaultdict
 from rpc_worker import RPCWorker
-import uuid
+import os
 
 
 class OrderDBError(Exception):
@@ -21,9 +21,9 @@ class OrderWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        unique_group_id = f"worker_{uuid.uuid4()}"
-        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", unique_group_id)
-        self.stock_worker = RPCWorker(router, "ReplyResponseStock", unique_group_id)
+        self.unique_group_id = f"worker_{os.environ["HOSTNAME"]}"
+        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
+        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -32,12 +32,14 @@ class OrderWorker():
                 items_quantities = self.get_items_in_order(order_entry)
                 msg["orderId"] = order_id
                 msg["items"] = items_quantities
+                msg["serviceId"] = self.unique_group_id
                 response = await self.stock_worker.request(json.dumps(msg), "UpdateStock", correlation_id=order_id)
                 return json.loads(response)
             case 'UpdatePayment':
                 msg["orderId"] = order_id
                 msg["userId"] = order_entry.user_id
                 msg["amount"] = order_entry.total_cost
+                msg["serviceId"] = self.unique_group_id
                 response = await self.payment_worker.request(json.dumps(msg), "UpdatePayment", correlation_id=order_id)
                 return json.loads(response)
             case 'RollbackPayment':
@@ -46,12 +48,12 @@ class OrderWorker():
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
                 return None
-            case 'RollbackStock':
-                items_quantities = self.get_items_in_order(order_entry)
-                msg["orderId"] = order_id
-                msg["items"] = items_quantities
-                await self.stock_worker.request_no_response(json.dumps(msg), "RollbackStock")
-                return None
+            # case 'RollbackStock':
+            #     items_quantities = self.get_items_in_order(order_entry)
+            #     msg["orderId"] = order_id
+            #     msg["items"] = items_quantities
+            #     await self.stock_worker.request_no_response(json.dumps(msg), "RollbackStock")
+            #     return None
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -72,8 +74,6 @@ class OrderWorker():
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
             else:
-                if status_stock.get("timeout"):
-                    await self.create_message_and_send('RollbackStock', order_id, order_entry)
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
 
 
