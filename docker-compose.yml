@@ -94,6 +94,70 @@ services:
     command: redis-server --requirepass redis --maxmemory 512mb
     networks:
       - mynetwork
+  
+  order-cluster-node-0:
+    image: redis:7.2-bookworm
+    command: redis-server --port 7006 --requirepass redis --masterauth redis --maxmemory 512mb --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes 
+    ports:
+      - "7006:7006"
+    networks:
+      - mynetwork
+
+  order-cluster-node-1:
+    image: redis:7.2-bookworm
+    command: redis-server --port 7001 --requirepass redis --masterauth redis --maxmemory 512mb --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    ports:
+      - "7001:7001"
+    networks:
+      - mynetwork
+  
+  order-cluster-node-2:
+    image: redis:7.2-bookworm
+    command: redis-server --port 7002 --requirepass redis --masterauth redis --maxmemory 512mb --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    ports:
+      - "7002:7002"
+    networks:
+      - mynetwork
+  
+  order-cluster-node-3:
+    image: redis:7.2-bookworm
+    command: redis-server --port 7003 --requirepass redis --masterauth redis --maxmemory 512mb --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    ports:
+      - "7003:7003"
+    networks:
+      - mynetwork
+  
+  order-cluster-node-4:
+    image: redis:7.2-bookworm
+    command: redis-server --port 7004 --requirepass redis --masterauth redis --maxmemory 512mb --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    ports:
+      - "7004:7004"
+    networks:
+      - mynetwork
+  
+  order-cluster-node-5:
+    image: redis:7.2-bookworm
+    command: redis-server --port 7005 --requirepass redis --masterauth redis --maxmemory 512mb --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
+    ports:
+      - "7005:7005"
+    networks:
+      - mynetwork
+  
+  order-cluster-creator:
+    image: redis:7.2-bookworm
+    container_name: redis-cluster-creator
+    command: redis-cli -a redis -p 7006 --cluster create order-cluster-node-0:7006 order-cluster-node-1:7001 order-cluster-node-2:7002 order-cluster-node-3:7003 order-cluster-node-4:7004 order-cluster-node-5:7005 --cluster-replicas 1 --cluster-yes
+    depends_on:
+      - order-cluster-node-0
+      - order-cluster-node-1
+      - order-cluster-node-2
+      - order-cluster-node-3
+      - order-cluster-node-4
+      - order-cluster-node-5
+    ports:
+      - "6999:6999"
+    networks:
+      - mynetwork
 
 networks:
   mynetwork:

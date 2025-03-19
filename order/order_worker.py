@@ -79,7 +79,7 @@ class OrderWorker():
         try:
             # get serialized data
             entry: bytes = self.db.get(order_id)
-        except redis.exceptions.RedisError:
+        except redis.exceptions.RedisClusterException:
             raise OrderDBError("can't reach Redis")
         # deserialize data if it exists else return null
         entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None

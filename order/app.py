@@ -3,6 +3,7 @@ import os
 import atexit
 import random
 import uuid
+from redis.cluster import RedisCluster
 import redis
 import requests
 import uvicorn
@@ -23,10 +24,11 @@ app = FastAPI(title="order-service")
 router = KafkaRouter("kafka:9092")
 app.include_router(router)
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
+db: RedisCluster = RedisCluster(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
                               password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+                            )
+
 
 def close_db_connection():
     db.close()
@@ -42,7 +44,7 @@ def create_order(user_id: str):
     value = msgpack.encode(OrderValue(paid=False, status="pending", items=[], user_id=user_id, total_cost=0))
     try:
         db.set(key, value)
-    except redis.exceptions.RedisError:
+    except redis.exceptions.RedisClusterException:
         raise HTTPException(400, DB_ERROR_STR)
     return {'order_id': key}
 
@@ -69,8 +71,8 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
     kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(generate_entry())
                                   for i in range(n)}
     try:
-        db.mset(kv_pairs)
-    except redis.exceptions.RedisError:
+        db.mset_nonatomic(kv_pairs)
+    except redis.exceptions.RedisClusterException:
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for orders successful"}
 
@@ -119,7 +121,7 @@ def add_item(order_id: str, item_id: str, quantity: int):
     order_entry.total_cost += int(quantity) * item_json["price"]
     try:
         db.set(order_id, msgpack.encode(order_entry))
-    except redis.exceptions.RedisError:
+    except redis.exceptions.RedisClusterException:
         raise HTTPException(400, DB_ERROR_STR)
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
                     status_code=200)
