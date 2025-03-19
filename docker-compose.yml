@@ -24,6 +24,27 @@ services:
       - zookeeper
     networks:
       - mynetwork
+  init-kafka:
+    image: confluentinc/cp-kafka:7.2.0
+    depends_on:
+      - kafka
+    networks:
+      - mynetwork
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      kafka-topics --bootstrap-server kafka:9092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdatePayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic RollbackPayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdateStock --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponseStock --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponsePayment --replication-factor 1 --partitions 4
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
   gateway:
     image: nginx:1.25-bookworm
     volumes:
@@ -46,8 +67,12 @@ services:
     env_file:
       - env/order_redis.env
     depends_on:
-      - order-db
-      - kafka
+      kafka:
+        condition: service_started
+      order-db:
+        condition: service_started
+      init-kafka:
+        condition: service_completed_successfully
     networks:
       - mynetwork
 
@@ -66,8 +91,12 @@ services:
     env_file:
       - env/stock_redis.env
     depends_on:
-      - stock-db
-      - kafka
+      kafka:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      init-kafka:
+        condition: service_completed_successfully
     networks:
       - mynetwork
 
@@ -84,8 +113,12 @@ services:
     env_file:
       - env/payment_redis.env
     depends_on:
-      - payment-db
-      - kafka
+      kafka:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      init-kafka:
+        condition: service_completed_successfully
     networks:
       - mynetwork
 

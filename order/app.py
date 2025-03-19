@@ -20,7 +20,7 @@ REQ_ERROR_STR = "Requests error"
 GATEWAY_URL = os.environ['GATEWAY_URL']
 
 app = FastAPI(title="order-service")
-router = KafkaRouter("kafka:9092")
+router = KafkaRouter("kafka:9092", logger=None)
 app.include_router(router)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
@@ -32,6 +32,7 @@ def close_db_connection():
     db.close()
 
 atexit.register(close_db_connection)
+
 logging.basicConfig(level=logging.CRITICAL+1, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 orderWorker = OrderWorker(logger, db, router)
