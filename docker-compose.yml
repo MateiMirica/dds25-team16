@@ -1,6 +1,21 @@
 version: "3"
 services:
 
+  envoy:
+    image: envoyproxy/envoy:v1.27.0
+    container_name: envoy
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    ports:
+      - "8000:80"  # Gateway port
+      - "9901:9901" # Admin dashboard
+    depends_on:
+      - order-service
+      - stock-service
+      - payment-service
+    networks:
+      - mynetwork
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.2.0
     ports:
@@ -9,6 +24,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
     networks:
       - mynetwork
+
   kafka:
     image: confluentinc/cp-kafka:7.2.0
     ports:
@@ -24,6 +40,7 @@ services:
       - zookeeper
     networks:
       - mynetwork
+
   init-kafka:
     image: confluentinc/cp-kafka:7.2.0
     depends_on:
@@ -36,33 +53,21 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --list
 
       echo -e 'Creating kafka topics'
-      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdatePayment --replication-factor 1 --partitions 4
-      kafka-topics --bootstrap-server kafka:9092 --create --topic RollbackPayment --replication-factor 1 --partitions 4
-      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdateStock --replication-factor 1 --partitions 4
-      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponseStock --replication-factor 1 --partitions 4
-      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponsePayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdatePayment --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:9092 --create --topic RollbackPayment --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdateStock --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponseStock --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponsePayment --replication-factor 1 --partitions 1
 
       echo -e 'Successfully created the following topics:'
       kafka-topics --bootstrap-server kafka:9092 --list
       "
-  gateway:
-    image: nginx:1.25-bookworm
-    volumes:
-      - ./gateway_nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "8000:80"
-    depends_on:
-      - order-service
-      - stock-service
-      - payment-service
-    networks:
-      - mynetwork
 
   order-service:
     build: ./order
     image: order:latest
     environment:
-      - GATEWAY_URL=http://gateway:80
+      - GATEWAY_URL=http://envoy:80
     command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/order_redis.env
@@ -108,7 +113,7 @@ services:
 
   payment-service:
     build: ./payment
-    image: user:latest
+    image: payment:latest
     command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/payment_redis.env
