@@ -51,12 +51,12 @@ substract_stock_lua_script = db.register_script(
 
     local stock_data = redis.call("GET", stockId)
     if not stock_data then
-        return "ITEM_NOT_FOUND"
+        return {"ITEM_NOT_FOUND", -1}
     end
 
     local stock = cmsgpack.unpack(stock_data)
     if stock.stock < amount then
-        return "INSUFFICIENT_STOCK"
+        return {"INSUFFICIENT_STOCK", -1}
     end
 
     stock.stock = stock.stock - amount

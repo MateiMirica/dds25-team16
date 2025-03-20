@@ -60,7 +60,6 @@ class PaymentWorker():
 
     def consume_update(self, msg: str):
         msg = json.loads(msg)
-
         return self.performTransaction(msg)
 
     def consume_rollback(self, msg: str):
