@@ -25,25 +25,45 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
+add_stock_lua_script = db.register_script(
+    """
+    local stockId = KEYS[1]
+    local amount = tonumber(ARGV[1])
 
-substract = db.register_script(""""
-        local stockId = KEYS[1]
-        local amount = tonumber(ARGV[1])
+    local stock_data = redis.call("GET", stockId)
+    if not stock_data then
+        return {"ITEM_NOT_FOUND", -1}
+    end
 
-        local stock_data = redis.call("GET", stockId)
-        if not stock_data then
-            return "ITEM_NOT_FOUND"
-        end
+    local stock = cmsgpack.unpack(stock_data)
 
-        local stock = cmsgpack.unpack(stock_data)
-        if stock.stock < amount then
-            return "INSUFFICIENT_STOCK"
-        end
+    stock.stock = stock.stock + amount
 
-        stock.stock = stock.stock - amount
-        redis.call("SET", stockId, cmsgpack.pack(stock))
-        return {"SUCCESS", stock.stock}                    
-""")
+    redis.call("SET", stockId, cmsgpack.pack(stock))
+    return {"SUCCESS", stock.stock}
+    """
+)
+
+substract_stock_lua_script = db.register_script(
+    """
+    local stockId = KEYS[1]
+    local amount = tonumber(ARGV[1])
+
+    local stock_data = redis.call("GET", stockId)
+    if not stock_data then
+        return "ITEM_NOT_FOUND"
+    end
+
+    local stock = cmsgpack.unpack(stock_data)
+    if stock.stock < amount then
+        return "INSUFFICIENT_STOCK"
+    end
+
+    stock.stock = stock.stock - amount
+    redis.call("SET", stockId, cmsgpack.pack(stock))
+    return {"SUCCESS", stock.stock}                    
+    """
+)
 
 def close_db_connection():
     db.close()
@@ -106,20 +126,23 @@ def find_item(item_id: str):
 
 @app.post('/add/{item_id}/{amount}')
 def add_stock(item_id: str, amount: int):
-    item_entry: StockValue = get_item_from_db(item_id)
     # update stock, serialize and update database
-    item_entry.stock += int(amount)
+    keys = [item_id]
+    args = [amount]
     try:
-        db.set(item_id, msgpack.encode(item_entry))
+        result_code, stock = add_stock_lua_script(keys=keys, args=args)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status_code=200)
+    if result_code == b"ITEM_NOT_FOUND":
+        raise HTTPException(400, DB_ERROR_STR)
+    else:
+        return Response(f"Item: {item_id} stock updated to: {stock}", status_code=200)
 
 
 @app.post('/subtract/{item_id}/{amount}')
 def remove_stock(item_id: str, amount: int):
     try:
-        result, stock = substract(keys=[item_id], args=[amount])
+        result, stock = substract_stock_lua_script(keys=[item_id], args=[amount])
         return Response(f"Item: {item_id} stock updated to {stock}", status_code=200)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)

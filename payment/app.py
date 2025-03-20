@@ -26,24 +26,45 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
-substract = db.register_script(""""
-        local userId = KEYS[1]
-        local amount = tonumber(ARGV[1])
+add_funds_lua_script = db.register_script(
+    """
+    local userId = KEYS[1]
+    local amount = tonumber(ARGV[1])
 
-        local user_data = redis.call("GET", stockId)
-        if not user_data then
-            return "USER_NOT_FOUND"
-        end
+    local user_data = redis.call("GET", stockId)
+    if not user_data then
+        return {"USER_NOT_FOUND", -1}
+    end
 
-        local user = cmsgpack.unpack(stock_data)
-        if user.credit < amount then
-            return "INSUFFICIENT_STOCK"
-        end
+    local user = cmsgpack.unpack(user_data)
 
-        user.credit = user.credit - amount
-        redis.call("SET", userId, cmsgpack.pack(user))
-        return {"SUCCESS", user.credit}                    
-""")
+    user.credit = user.credit + amount
+
+    redis.call("SET", userId, cmsgpack.pack(user))
+    return {"SUCCESS", user.credit}
+    """
+)
+
+substract_funds_lua_script = db.register_script(
+    """
+    local userId = KEYS[1]
+    local amount = tonumber(ARGV[1])
+
+    local user_data = redis.call("GET", stockId)
+    if not user_data then
+        return "USER_NOT_FOUND"
+    end
+
+    local user = cmsgpack.unpack(stock_data)
+    if user.credit < amount then
+        return "INSUFFICIENT_STOCK"
+    end
+
+    user.credit = user.credit - amount
+    redis.call("SET", userId, cmsgpack.pack(user))
+    return {"SUCCESS", user.credit}                    
+    """
+)
 
 def close_db_connection():
     db.close()
@@ -87,38 +108,33 @@ def find_user(user_id: str):
     except:
         raise HTTPException(400, DB_ERROR_STR)
     if user_entry == None:
-        raise HTTPException(400, "No such user")
+        raise HTTPException(400, "No such User")
 
     return {
         "user_id": user_id,
         "credit": user_entry.credit
     }
-    
-
 
 @app.post('/add_funds/{user_id}/{amount}')
 def add_credit(user_id: str, amount: int):
-    user_entry: UserValue = None
+    keys = [user_id]
+    args = [amount]
     try:
-        user_entry = paymentWorker.get_user_from_db(user_id)
-    except:
-        raise HTTPException(400, DB_ERROR_STR)
-    if user_entry == None:
-        raise HTTPException(400, "No such user")
-    # update credit, serialize and update database
-    user_entry.credit += int(amount)
-    try:
-        db.set(user_id, msgpack.encode(user_entry))
+        result_code, credit = add_funds_lua_script(keys=keys, args=args)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status_code=200)
+
+    if result_code == b"USER_NOT_FOUND":
+        raise HTTPException(400, "No such user")
+    else:
+        return Response(f"User: {user_id} credit updated to: {credit}", status_code=200)
 
 
 @app.post('/pay/{user_id}/{amount}')
 def remove_credit(user_id: str, amount: int):
     logging.debug(f"Removing {amount} credit from user: {user_id}")
     try:
-        result, credit = substract(keys=[user_id], args=[amount])
+        result, credit = substract_funds_lua_script(keys=[user_id], args=[amount])
         return Response(f"User: {user_id} credit updated to: {credit}", status_code=200)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
