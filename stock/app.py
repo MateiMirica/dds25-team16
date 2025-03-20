@@ -143,10 +143,15 @@ def add_stock(item_id: str, amount: int):
 def remove_stock(item_id: str, amount: int):
     try:
         result, stock = substract_stock_lua_script(keys=[item_id], args=[amount])
-        return Response(f"Item: {item_id} stock updated to {stock}", status_code=200)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-
+    
+    if result == b"ITEM_NOT_FOUND":
+        raise HTTPException(400, f"Item: {item_id} not found!")
+    elif result == b"INSUFFICIENT_STOCK":
+        raise HTTPException(400, f"Item: {item_id} has insufficient stock!")
+    elif result == b"SUCCESS":
+        return Response(f"Item: {item_id} stock updated to: {stock}", status_code=200)
 if __name__ == '__main__':
     uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
 else:

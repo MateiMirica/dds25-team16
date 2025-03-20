@@ -50,15 +50,15 @@ substract_funds_lua_script = db.register_script(
     local userId = KEYS[1]
     local amount = tonumber(ARGV[1])
 
-    local user_data = redis.call("GET", stockId)
-    if not user_data then
-        return "USER_NOT_FOUND"
-    end
+        local user_data = redis.call("GET", stockId)
+        if not user_data then
+            return {"USER_NOT_FOUND", -1}
+        end
 
-    local user = cmsgpack.unpack(stock_data)
-    if user.credit < amount then
-        return "INSUFFICIENT_STOCK"
-    end
+        local user = cmsgpack.unpack(stock_data)
+        if user.credit < amount then
+            return {"INSUFFICIENT_FUNDS", -1}
+        end
 
     user.credit = user.credit - amount
     redis.call("SET", userId, cmsgpack.pack(user))
@@ -135,9 +135,16 @@ def remove_credit(user_id: str, amount: int):
     logging.debug(f"Removing {amount} credit from user: {user_id}")
     try:
         result, credit = substract_funds_lua_script(keys=[user_id], args=[amount])
-        return Response(f"User: {user_id} credit updated to: {credit}", status_code=200)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
+        
+    if result == b"USER_NOT_FOUND":
+        return Response("No such user", status_code=400)
+    elif result == b"INSUFFICIENT_FUNDS": 
+        return Response("Not enough balance", status_code=400)
+    elif result == b"SUCCESS":
+        return Response(f"User: {user_id} credit updated to {credit}", status_code=200)
+    
 
 
 if __name__ == '__main__':
