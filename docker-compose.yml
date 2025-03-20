@@ -72,11 +72,9 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --list
 
       echo -e 'Creating kafka topics'
-      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdatePayment --replication-factor 1 --partitions 1
-      kafka-topics --bootstrap-server kafka:9092 --create --topic RollbackPayment --replication-factor 1 --partitions 1
-      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdateStock --replication-factor 1 --partitions 1
-      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponseStock --replication-factor 1 --partitions 1
-      kafka-topics --bootstrap-server kafka:9092 --create --topic ReplyResponsePayment --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdatePayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic RollbackPayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdateStock --replication-factor 1 --partitions 4
 
       echo -e 'Successfully created the following topics:'
       kafka-topics --bootstrap-server kafka:9092 --list

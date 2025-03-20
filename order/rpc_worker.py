@@ -1,17 +1,18 @@
 import logging
-from uuid import uuid4
 from asyncio import Future, wait_for
 import json
 from faststream.types import SendableMessage
 from faststream.kafka.fastapi import KafkaRouter
+import os
 
 class RPCWorker:
     def __init__(self, router: KafkaRouter, reply_topic: str, unique_group_id: str) -> None:
         self.responses: dict[str, Future[bytes]] = {}
         self.router = router
-        self.reply_topic = reply_topic
 
-        self.subscriber = router.subscriber(reply_topic, group_id=unique_group_id)
+        self.reply_topic = reply_topic + f"{unique_group_id}"
+
+        self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
 
     def _handle_responses(self, msg) -> None:
