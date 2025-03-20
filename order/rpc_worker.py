@@ -17,17 +17,16 @@ class RPCWorker:
 
     async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)
-        if message["serviceId"] == self.unique_group_id:
-            logging.getLogger().info(f"HANDLED RESPONSE: {message}")
-            if future := self.responses.pop(message["orderId"], None):
-                future.set_result(msg)
-            elif message["status"] is True:
-                if self.reply_topic == "ReplyResponsePayment":
-                    logging.getLogger().info(f"MESSAGE PAYMENT: {message}")
-                    await self.request_no_response(json.dumps(message), "RollbackPayment")
-                elif self.reply_topic == "ReplyResponseStock":
-                    logging.getLogger().info(f"MESSAGE STOCK: {message}")
-                    await self.request_no_response(json.dumps(message), "RollbackStock")
+        if message["serviceId"] != self.unique_group_id:
+            return
+
+        if future := self.responses.pop(message["orderId"], None):
+            future.set_result(msg)
+        elif message["status"] is True:
+            if self.reply_topic == "ReplyResponsePayment":
+                await self.request_no_response(json.dumps(message), "RollbackPayment")
+            elif self.reply_topic == "ReplyResponseStock":
+                await self.request_no_response(json.dumps(message), "RollbackStock")
 
 
     async def request(
