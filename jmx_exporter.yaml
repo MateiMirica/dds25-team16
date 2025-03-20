@@ -1,0 +1,9 @@
+startDelaySeconds: 0
+hostPort: 0.0.0.0:9999
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+rules:
+  - pattern: "kafka.server<type=(.+), name=(.+)><>Value"
+  - pattern: "kafka.network<type=(.+), name=(.+)><>Count"
+  - pattern: "kafka.controller<type=(.+), name=(.+)><>Value"
+  - pattern: "kafka.log<type=(.+), name=(.+)><>Value"

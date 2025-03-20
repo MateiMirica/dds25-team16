@@ -26,18 +26,37 @@ services:
       - mynetwork
 
   kafka:
-    image: confluentinc/cp-kafka:7.2.0
+    image: confluentinc/cp-server:7.2.0
     ports:
       - "9093:9093"
     environment:
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT,METRICS:PLAINTEXT'
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,PLAINTEXT://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,PLAINTEXT://localhost:9093
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,PLAINTEXT://0.0.0.0:9093,METRICS://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,PLAINTEXT://localhost:9093,METRICS://kafka:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
     depends_on:
       - zookeeper
+    networks:
+      - mynetwork
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:latest
+    depends_on:
+      - kafka
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: "kafka:29092"
+      CONTROL_CENTER_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      CONTROL_CENTER_STREAMS_NUM_STREAM_THREADS: 1
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_MODE: "distributed"
+      PORT: 9021
+    ports:
+      - "9021:9021"
     networks:
       - mynetwork
 
@@ -132,6 +151,25 @@ services:
     command: redis-server --requirepass redis --maxmemory 512mb
     networks:
       - mynetwork
+
+#   prometheus:
+#     image: prom/prometheus:latest
+#     volumes:
+#       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+#     ports:
+#       - "9090:9090"
+
+#   grafana:
+#     image: grafana/grafana:latest
+#     ports:
+#       - "3000:3000"
+#     volumes:
+#       - grafana-data:/var/lib/grafana
+#     environment:
+#       - GF_SECURITY_ADMIN_PASSWORD=admin
+
+# volumes:
+#   grafana-data:
 
 networks:
   mynetwork:
