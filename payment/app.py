@@ -26,6 +26,24 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
+substract = db.register_script(""""
+        local userId = KEYS[1]
+        local amount = tonumber(ARGV[1])
+
+        local user_data = redis.call("GET", stockId)
+        if not user_data then
+            return "USER_NOT_FOUND"
+        end
+
+        local user = cmsgpack.unpack(stock_data)
+        if user.credit < amount then
+            return "INSUFFICIENT_STOCK"
+        end
+
+        user.credit = user.credit - amount
+        redis.call("SET", userId, cmsgpack.pack(user))
+        return {"SUCCESS", user.credit}                    
+""")
 
 def close_db_connection():
     db.close()
@@ -100,21 +118,10 @@ def add_credit(user_id: str, amount: int):
 def remove_credit(user_id: str, amount: int):
     logging.debug(f"Removing {amount} credit from user: {user_id}")
     try:
-        user_entry = paymentWorker.get_user_from_db(user_id)
-    except:
-        raise HTTPException(400, DB_ERROR_STR)
-    if user_entry == None:
-        raise HTTPException(400, "No such user")
-    # update credit, serialize and update database
-    user_entry.credit -= int(amount)
-    if user_entry.credit < 0:
-        raise HTTPException(400, f"User: {user_id} credit cannot get reduced below zero!")
-    try:
-        db.set(user_id, msgpack.encode(user_entry))
+        result, credit = substract(keys=[user_id], args=[amount])
+        return Response(f"User: {user_id} credit updated to: {credit}", status_code=200)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status_code=200)
-
 
 
 if __name__ == '__main__':

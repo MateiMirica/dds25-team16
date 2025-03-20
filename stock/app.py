@@ -19,11 +19,31 @@ app = FastAPI(title="stock-service")
 router = KafkaRouter("kafka:9092")
 app.include_router(router)
 
+
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
+
+substract = db.register_script(""""
+        local stockId = KEYS[1]
+        local amount = tonumber(ARGV[1])
+
+        local stock_data = redis.call("GET", stockId)
+        if not stock_data then
+            return "ITEM_NOT_FOUND"
+        end
+
+        local stock = cmsgpack.unpack(stock_data)
+        if stock.stock < amount then
+            return "INSUFFICIENT_STOCK"
+        end
+
+        stock.stock = stock.stock - amount
+        redis.call("SET", stockId, cmsgpack.pack(stock))
+        return {"SUCCESS", stock.stock}                    
+""")
 
 def close_db_connection():
     db.close()
@@ -98,17 +118,11 @@ def add_stock(item_id: str, amount: int):
 
 @app.post('/subtract/{item_id}/{amount}')
 def remove_stock(item_id: str, amount: int):
-    item_entry: StockValue = get_item_from_db(item_id)
-    # update stock, serialize and update database
-    item_entry.stock -= int(amount)
-    logging.debug(f"Item: {item_id} stock updated to: {item_entry.stock}")
-    if item_entry.stock < 0:
-        raise HTTPException(400, f"Item: {item_id} stock cannot get reduced below zero!")
     try:
-        db.set(item_id, msgpack.encode(item_entry))
+        result, stock = substract(keys=[item_id], args=[amount])
+        return Response(f"Item: {item_id} stock updated to {stock}", status_code=200)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {item_entry.stock}", status_code=200)
 
 if __name__ == '__main__':
     uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=True)
