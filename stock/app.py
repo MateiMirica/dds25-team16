@@ -31,7 +31,7 @@ def close_db_connection():
 
 atexit.register(close_db_connection)
 
-logging.basicConfig(level=logging.CRITICAL+1, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 sstockWorker = StockWorker(logger, db, router)
 

@@ -10,14 +10,24 @@ class RPCWorker:
         self.responses: dict[str, Future[bytes]] = {}
         self.router = router
         self.reply_topic = reply_topic
+        self.unique_group_id = unique_group_id
 
         self.subscriber = router.subscriber(reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
 
-    def _handle_responses(self, msg) -> None:
+    async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)
+        if message["serviceId"] != self.unique_group_id:
+            return
+
         if future := self.responses.pop(message["orderId"], None):
             future.set_result(msg)
+        elif message["status"] is True:
+            if self.reply_topic == "ReplyResponsePayment":
+                await self.request_no_response(json.dumps(message), "RollbackPayment")
+            elif self.reply_topic == "ReplyResponseStock":
+                await self.request_no_response(json.dumps(message), "RollbackStock")
+
 
     async def request(
         self,
@@ -37,7 +47,7 @@ class RPCWorker:
         try:
             response: bytes = await wait_for(future, timeout=timeout)
         except Exception:
-            logging.getLogger().warning("Timedout")
+            logging.getLogger().info("Timedout")
             self.responses.pop(correlation_id, None)
             msg = dict()
             msg["status"] = False
