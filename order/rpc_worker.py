@@ -1,4 +1,5 @@
 import logging
+from uuid import uuid4
 from asyncio import Future, wait_for
 import json
 from faststream.types import SendableMessage
@@ -9,16 +10,24 @@ class RPCWorker:
     def __init__(self, router: KafkaRouter, reply_topic: str, unique_group_id: str) -> None:
         self.responses: dict[str, Future[bytes]] = {}
         self.router = router
-
+        self.unique_group_id = unique_group_id
         self.reply_topic = reply_topic + f"{unique_group_id}"
-
         self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
 
-    def _handle_responses(self, msg) -> None:
+    async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)
+        if message["serviceId"] != self.unique_group_id:
+            return
+
         if future := self.responses.pop(message["orderId"], None):
             future.set_result(msg)
+        elif message["status"] is True:
+            if self.reply_topic == "ReplyResponsePayment":
+                await self.request_no_response(json.dumps(message), "RollbackPayment")
+            elif self.reply_topic == "ReplyResponseStock":
+                await self.request_no_response(json.dumps(message), "RollbackStock")
+
 
     async def request(
         self,
@@ -28,7 +37,6 @@ class RPCWorker:
         timeout: float = 10.0,
     ) -> bytes:
         future = self.responses[correlation_id] = Future[bytes]()
-        # print(len(self.responses))
 
         await self.router.broker.publish(
             data, topic,
@@ -39,11 +47,13 @@ class RPCWorker:
         try:
             response: bytes = await wait_for(future, timeout=timeout)
         except Exception:
-            logging.getLogger().warning("Timedout")
+            logging.getLogger().info("Timedout")
             self.responses.pop(correlation_id, None)
             msg = dict()
-            print("timeout")
             msg["status"] = False
             return json.dumps(msg).encode("utf-8")
         else:
             return response
+
+    async def request_no_response(self, data: SendableMessage, topic: str):
+        await self.router.broker.publish(data, topic)

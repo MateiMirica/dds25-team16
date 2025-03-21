@@ -1,3 +1,5 @@
+import logging
+
 import redis
 import json
 from msgspec import msgpack, Struct
@@ -62,6 +64,7 @@ class PaymentWorker():
 
     def consume_rollback(self, msg: str):
         msg = json.loads(msg)
+        logging.getLogger().info(f"ROLLBACK: {msg}")
         self.performRollback(msg)
 
     def get_user_from_db(self, user_id: str) -> UserValue | None:
@@ -74,13 +77,13 @@ class PaymentWorker():
         entry: UserValue | None = msgpack.decode(entry, type=UserValue) if entry else None
         return entry
 
-    def paymentSuccess(self, orderId):
-        data = {'orderId': orderId, 'status': True} 
-        return json.dumps(data)
+    def paymentSuccess(self, msg):
+        msg["status"] = True
+        return json.dumps(msg)
     
-    def paymentFailed(self, orderId):
-        data = {'orderId': orderId, 'status': False}
-        return json.dumps(data)
+    def paymentFailed(self, msg):
+        msg["status"] = False
+        return json.dumps(msg)
 
     def performTransaction(self, msg):
         orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
@@ -90,17 +93,17 @@ class PaymentWorker():
             result = self.transaction_lua_script(keys=[userId], args=[amount])
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
-            return self.paymentFailed(orderId)
+            return self.paymentFailed(msg)
 
         # Handle different cases
         if result == b"USER_NOT_FOUND":
-            return self.paymentFailed(orderId)
+            return self.paymentFailed(msg)
         elif result == b"INSUFFICIENT_FUNDS":
             self.logger.info(f"Not enough balance for user {userId}")
-            return self.paymentFailed(orderId)
+            return self.paymentFailed(msg)
         elif result == b"SUCCESS":
             self.logger.info(f"Payment successful for order {orderId}")
-            return self.paymentSuccess(orderId)
+            return self.paymentSuccess(msg)
 
     def performRollback(self, msg):
         userId, amount = msg["userId"], msg["amount"]
