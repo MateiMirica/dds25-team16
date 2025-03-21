@@ -1,3 +1,9 @@
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
+
 static_resources:
   listeners:
   - name: listener_0
@@ -31,32 +37,15 @@ static_resources:
                   cluster: stock-app
                   prefix_rewrite: "/"
           http_filters:
-          - name: envoy.filters.http.local_ratelimit
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
-              stat_prefix: local_rate_limit
-              token_bucket:
-                max_tokens: 500
-                tokens_per_fill: 500
-                fill_interval: 1s
-              filter_enabled:
-                runtime_key: local_rate_limit_enabled
-                default_value:
-                  numerator: 100
-                  denominator: HUNDRED
           - name: envoy.filters.http.router
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
   - name: order-app
-    connect_timeout: 0.25s
+#    connect_timeout: 0.25s
     type: STRICT_DNS
     lb_policy: LEAST_REQUEST
-    circuit_breakers:
-      thresholds:
-      - max_connections: 100
-        max_requests: 500
     load_assignment:
       cluster_name: order-app
       endpoints:
@@ -68,13 +57,9 @@ static_resources:
                 port_value: 5000
 
   - name: payment-app
-    connect_timeout: 0.25s
+#    connect_timeout: 0.25s
     type: STRICT_DNS
     lb_policy: LEAST_REQUEST
-    circuit_breakers:
-      thresholds:
-      - max_connections: 100
-        max_requests: 500
     load_assignment:
       cluster_name: payment-app
       endpoints:
@@ -86,13 +71,9 @@ static_resources:
                 port_value: 5000
 
   - name: stock-app
-    connect_timeout: 0.25s
+#    connect_timeout: 0.25s
     type: STRICT_DNS
     lb_policy: LEAST_REQUEST
-    circuit_breakers:
-      thresholds:
-      - max_connections: 100
-        max_requests: 500
     load_assignment:
       cluster_name: stock-app
       endpoints:
