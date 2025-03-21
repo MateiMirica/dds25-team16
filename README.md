@@ -1,5 +1,9 @@
 # Web-scale Data Management Project Template
 
+### How to run the application
+
+run  `docker compose up --scale order-service=4 --scale stock-service=4 --scale payment-service=4 --build -d` to build the app with 4 instances of each service. This can be replaced with whatever number.
+
 Basic project structure with Python's Flask and Redis. 
 **You are free to use any web framework in any language and any database you like for this project.**
 
