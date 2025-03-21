@@ -65,6 +65,22 @@ substract_stock_lua_script = db.register_script(
     """
 )
 
+batch_create_stock_lua_script = db.register_script(
+    """
+    local n = tonumber(ARGV[1])
+    local starting_stock = tonumber(ARGV[2])
+    local item_price = tonumber(ARGV[3])
+
+    local kv_pairs = {}
+    for i=0,n-1 do
+        kv_pairs[tostring(i)] = cmsgpack.pack({stock=starting_stock, price=item_price})
+    end
+    
+    redis.call("MSET", unpack(kv_pairs))
+    return "SUCCESS"
+    """
+)
+
 def close_db_connection():
     db.close()
 
@@ -100,16 +116,13 @@ def create_item(price: int):
         raise HTTPException(400, DB_ERROR_STR)
     return {'item_id': key}
 
-
 @app.post('/batch_init/{n}/{starting_stock}/{item_price}')
 def batch_init_users(n: int, starting_stock: int, item_price: int):
     n = int(n)
     starting_stock = int(starting_stock)
     item_price = int(item_price)
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(StockValue(stock=starting_stock, price=item_price))
-                                  for i in range(n)}
     try:
-        db.mset(kv_pairs)
+        batch_create_stock_lua_script(keys=[], args=[n, starting_stock, item_price])
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for stock successful"}

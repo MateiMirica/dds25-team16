@@ -66,6 +66,21 @@ substract_funds_lua_script = db.register_script(
     """
 )
 
+batch_create_user_lua_script = db.register_script(
+    """
+    local n = tonumber(ARGV[1])
+    local starting_money = tonumber(ARGV[2])
+    local kv_pairs = {}
+
+    for i=0,n-1 do
+        kv_pairs[tostring(i)] = cmsgpack.pack({credit=starting_money})
+    end
+
+    redis.call("MSET", unpack(kv_pairs))
+    return "SUCCESS"
+    """
+)
+
 def close_db_connection():
     db.close()
 
@@ -91,10 +106,8 @@ def create_user():
 def batch_init_users(n: int, starting_money: int):
     n = int(n)
     starting_money = int(starting_money)
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(UserValue(credit=starting_money))
-                                  for i in range(n)}
     try:
-        db.mset(kv_pairs)
+        batch_create_user_lua_script(keys=[], args=[n, starting_money])
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for users successful"}
