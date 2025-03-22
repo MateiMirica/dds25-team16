@@ -26,6 +26,59 @@ db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
 
+add_funds_lua_script = db.register_script(
+    """
+    local userId = KEYS[1]
+    local amount = tonumber(ARGV[1])
+
+    local user_data = redis.call("GET", userId)
+    if not user_data then
+        return {"USER_NOT_FOUND", -1}
+    end
+
+    local user = cmsgpack.unpack(user_data)
+
+    user.credit = user.credit + amount
+
+    redis.call("SET", userId, cmsgpack.pack(user))
+    return {"SUCCESS", user.credit}
+    """
+)
+
+substract_funds_lua_script = db.register_script(
+    """
+    local userId = KEYS[1]
+    local amount = tonumber(ARGV[1])
+
+    local user_data = redis.call("GET", userId)
+    if not user_data then
+        return {"USER_NOT_FOUND", -1}
+    end
+
+    local user = cmsgpack.unpack(user_data)
+    if user.credit < amount then
+        return {"INSUFFICIENT_FUNDS", -1}
+    end
+
+    user.credit = user.credit - amount
+    redis.call("SET", userId, cmsgpack.pack(user))
+    return {"SUCCESS", user.credit}                    
+    """
+)
+
+batch_create_user_lua_script = db.register_script(
+    """
+    local n = tonumber(ARGV[1])
+    local starting_money = tonumber(ARGV[2])
+    local kv_pairs = {}
+
+    for i=0,n-1 do
+        redis.call("SET", tostring(i), cmsgpack.pack({credit=starting_money}))
+    end
+
+    return "SUCCESS"
+    """
+)
 
 def close_db_connection():
     db.close()
@@ -52,10 +105,8 @@ def create_user():
 def batch_init_users(n: int, starting_money: int):
     n = int(n)
     starting_money = int(starting_money)
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(UserValue(credit=starting_money))
-                                  for i in range(n)}
     try:
-        db.mset(kv_pairs)
+        batch_create_user_lua_script(keys=[], args=[n, starting_money])
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for users successful"}
@@ -69,52 +120,43 @@ def find_user(user_id: str):
     except:
         raise HTTPException(400, DB_ERROR_STR)
     if user_entry == None:
-        raise HTTPException(400, "No such user")
+        raise HTTPException(400, "No such User")
 
     return {
         "user_id": user_id,
         "credit": user_entry.credit
     }
-    
-
 
 @app.post('/add_funds/{user_id}/{amount}')
 def add_credit(user_id: str, amount: int):
-    user_entry: UserValue = None
+    keys = [user_id]
+    args = [amount]
     try:
-        user_entry = paymentWorker.get_user_from_db(user_id)
-    except:
-        raise HTTPException(400, DB_ERROR_STR)
-    if user_entry == None:
-        raise HTTPException(400, "No such user")
-    # update credit, serialize and update database
-    user_entry.credit += int(amount)
-    try:
-        db.set(user_id, msgpack.encode(user_entry))
+        result_code, credit = add_funds_lua_script(keys=keys, args=args)
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status_code=200)
+
+    if result_code == b"USER_NOT_FOUND":
+        raise HTTPException(400, "No such user")
+    else:
+        return Response(f"User: {user_id} credit updated to: {credit}", status_code=200)
 
 
 @app.post('/pay/{user_id}/{amount}')
 def remove_credit(user_id: str, amount: int):
     logging.debug(f"Removing {amount} credit from user: {user_id}")
     try:
-        user_entry = paymentWorker.get_user_from_db(user_id)
-    except:
-        raise HTTPException(400, DB_ERROR_STR)
-    if user_entry == None:
-        raise HTTPException(400, "No such user")
-    # update credit, serialize and update database
-    user_entry.credit -= int(amount)
-    if user_entry.credit < 0:
-        raise HTTPException(400, f"User: {user_id} credit cannot get reduced below zero!")
-    try:
-        db.set(user_id, msgpack.encode(user_entry))
+        result, credit = substract_funds_lua_script(keys=[user_id], args=[amount])
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {user_entry.credit}", status_code=200)
-
+        
+    if result == b"USER_NOT_FOUND":
+        raise HTTPException(400, "No such user")
+    elif result == b"INSUFFICIENT_FUNDS": 
+        return Response("Not enough balance", status_code=400)
+    elif result == b"SUCCESS":
+        return Response(f"User: {user_id} credit updated to: {credit}", status_code=200)
+    
 
 
 if __name__ == '__main__':
