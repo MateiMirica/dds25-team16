@@ -16,7 +16,7 @@ from stock_worker import StockValue, StockWorker
 DB_ERROR_STR = "DB error"
 
 app = FastAPI(title="stock-service")
-router = KafkaRouter("kafka:9092")
+router = KafkaRouter("kafka:9092", logger=None)
 app.include_router(router)
 
 
@@ -73,10 +73,9 @@ batch_create_stock_lua_script = db.register_script(
 
     local kv_pairs = {}
     for i=0,n-1 do
-        kv_pairs[tostring(i)] = cmsgpack.pack({stock=starting_stock, price=item_price})
+        redis.call("SET", tostring(i), cmsgpack.pack({stock=starting_stock, price=item_price}))
     end
     
-    redis.call("MSET", unpack(kv_pairs))
     return "SUCCESS"
     """
 )
