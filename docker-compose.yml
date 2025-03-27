@@ -83,10 +83,10 @@ services:
   order-service:
     build: ./order
     image: order:latest
-#    volumes:
-#      - "./order/order_logs.txt:/order/order_logs.txt"
     environment:
       - GATEWAY_URL=http://envoy:80
+    volumes:
+      - "./order/logs:/order/logs"
     command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/order_redis.env

@@ -25,11 +25,7 @@ class OrderWorker():
         self.unique_group_id = f"order_worker_{os.environ["HOSTNAME"]}"
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
         self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
-        # self.create_log_file()
-        self.recovery_logger = RecoveryLogger("/order/order_logs.txt")
-
-    # def create_log_file(self):
-    #     with open("/order/")
+        self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()

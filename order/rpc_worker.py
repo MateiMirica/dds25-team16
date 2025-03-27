@@ -14,7 +14,7 @@ class RPCWorker:
         self.reply_topic = reply_topic + f"{unique_group_id}"
         self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
-        self.recovery_logger = RecoveryLogger("/order/order_logs.txt")
+        self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
 
     async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)

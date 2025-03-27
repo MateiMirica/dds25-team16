@@ -1,9 +1,18 @@
 import json
+import os
 
 
 class RecoveryLogger:
     def __init__(self, output_file_path):
         self.file_path = output_file_path
+        self.__ensure_file_exists()
+
+    def __ensure_file_exists(self):
+        print(self.file_path)
+        if not os.path.exists(self.file_path):
+            with open(self.file_path, "w") as file:
+                file.write(json.dumps({}))
+                file.flush()
 
     def __load_data(self):
         try:
