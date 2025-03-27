@@ -22,7 +22,7 @@ class OrderWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.unique_group_id = f"worker_{os.environ["HOSTNAME"]}"
+        self.unique_group_id = f"order_worker_{os.environ["HOSTNAME"]}"
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
         self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
         # self.create_log_file()

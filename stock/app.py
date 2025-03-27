@@ -16,7 +16,7 @@ from stock_worker import StockValue, StockWorker
 DB_ERROR_STR = "DB error"
 
 app = FastAPI(title="stock-service")
-router = KafkaRouter("kafka:9092")
+router = KafkaRouter("kafka:9092", logger=None)
 app.include_router(router)
 
 

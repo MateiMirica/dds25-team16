@@ -1,6 +1,21 @@
 version: "3"
 services:
 
+  envoy:
+    image: envoyproxy/envoy:v1.27.0
+    container_name: envoy
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    ports:
+      - "8000:80"  # Gateway port
+      - "9901:9901" # Admin dashboard
+    depends_on:
+      - order-service
+      - stock-service
+      - payment-service
+    networks:
+      - mynetwork
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.2.0
     ports:
@@ -9,33 +24,61 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
     networks:
       - mynetwork
+
   kafka:
-    image: confluentinc/cp-kafka:7.2.0
+    image: confluentinc/cp-server:7.2.0
     ports:
       - "9093:9093"
     environment:
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT,METRICS:PLAINTEXT'
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,PLAINTEXT://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,PLAINTEXT://localhost:9093
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,PLAINTEXT://0.0.0.0:9093,METRICS://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,PLAINTEXT://localhost:9093,METRICS://kafka:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
     depends_on:
       - zookeeper
     networks:
       - mynetwork
-  gateway:
-    image: nginx:1.25-bookworm
-    volumes:
-      - ./gateway_nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "8000:80"
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:latest
     depends_on:
-      - order-service
-      - stock-service
-      - payment-service
+      - kafka
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: "kafka:29092"
+      CONTROL_CENTER_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      CONTROL_CENTER_STREAMS_NUM_STREAM_THREADS: 1
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_MODE: "distributed"
+      PORT: 9021
+    ports:
+      - "9021:9021"
     networks:
       - mynetwork
+
+  init-kafka:
+    image: confluentinc/cp-kafka:7.2.0
+    depends_on:
+      - kafka
+    networks:
+      - mynetwork
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      kafka-topics --bootstrap-server kafka:9092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdatePayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic RollbackPayment --replication-factor 1 --partitions 4
+      kafka-topics --bootstrap-server kafka:9092 --create --topic UpdateStock --replication-factor 1 --partitions 4
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
 
   order-service:
     build: ./order
@@ -43,13 +86,17 @@ services:
 #    volumes:
 #      - "./order/order_logs.txt:/order/order_logs.txt"
     environment:
-      - GATEWAY_URL=http://gateway:80
+      - GATEWAY_URL=http://envoy:80
     command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/order_redis.env
     depends_on:
-      - order-db
-      - kafka
+      kafka:
+        condition: service_started
+      order-db:
+        condition: service_started
+      init-kafka:
+        condition: service_completed_successfully
     networks:
       - mynetwork
 
@@ -68,8 +115,12 @@ services:
     env_file:
       - env/stock_redis.env
     depends_on:
-      - stock-db
-      - kafka
+      kafka:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      init-kafka:
+        condition: service_completed_successfully
     networks:
       - mynetwork
 
@@ -81,13 +132,17 @@ services:
 
   payment-service:
     build: ./payment
-    image: user:latest
+    image: payment:latest
     command: [ "bash", "./wait-for-it.sh", "kafka", "9092", "--", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
     env_file:
       - env/payment_redis.env
     depends_on:
-      - payment-db
-      - kafka
+      kafka:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      init-kafka:
+        condition: service_completed_successfully
     networks:
       - mynetwork
 

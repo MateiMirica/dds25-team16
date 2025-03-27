@@ -18,7 +18,7 @@ DB_ERROR_STR = "DB error"
 
 
 app = FastAPI(title="payment-service")
-router = KafkaRouter("kafka:9092")
+router = KafkaRouter("kafka:9092", logger=None)
 app.include_router(router)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
