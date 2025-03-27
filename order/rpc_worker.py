@@ -1,9 +1,9 @@
 import logging
-from uuid import uuid4
 from asyncio import Future, wait_for
 import json
 from faststream.types import SendableMessage
 from faststream.kafka.fastapi import KafkaRouter
+from RecoveryLogger import RecoveryLogger
 
 class RPCWorker:
     def __init__(self, router: KafkaRouter, reply_topic: str, unique_group_id: str) -> None:
@@ -14,6 +14,7 @@ class RPCWorker:
 
         self.subscriber = router.subscriber(reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
+        self.recovery_logger = RecoveryLogger("/order/order_logs.txt")
 
     async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)
@@ -25,8 +26,10 @@ class RPCWorker:
         elif message["status"] is True:
             if self.reply_topic == "ReplyResponsePayment":
                 await self.request_no_response(json.dumps(message), "RollbackPayment")
+                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED", 400)
             elif self.reply_topic == "ReplyResponseStock":
                 await self.request_no_response(json.dumps(message), "RollbackStock")
+                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED", 400)
 
 
     async def request(

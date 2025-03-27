@@ -2,6 +2,7 @@ import redis
 import json
 from msgspec import msgpack, Struct
 from collections import defaultdict
+from RecoveryLogger import RecoveryLogger
 from rpc_worker import RPCWorker
 import os
 
@@ -24,6 +25,11 @@ class OrderWorker():
         self.unique_group_id = f"worker_{os.environ["HOSTNAME"]}"
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
         self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
+        # self.create_log_file()
+        self.recovery_logger = RecoveryLogger("/order/order_logs.txt")
+
+    # def create_log_file(self):
+    #     with open("/order/")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -48,12 +54,6 @@ class OrderWorker():
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
                 return None
-            # case 'RollbackStock':
-            #     items_quantities = self.get_items_in_order(order_entry)
-            #     msg["orderId"] = order_id
-            #     msg["items"] = items_quantities
-            #     await self.stock_worker.request_no_response(json.dumps(msg), "RollbackStock")
-            #     return None
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -66,15 +66,22 @@ class OrderWorker():
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if order_entry.paid is True:
             return order_entry
-
+        self.recovery_logger.write_to_log(order_id, "STARTED", -1)
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
         if status_payment["status"] is True:
             status_stock = await self.create_message_and_send('UpdateStock', order_id, order_entry)
             if status_stock["status"] is True:
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
+                self.recovery_logger.write_to_log(order_id, "COMPLETED", 200)
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                # if order dies here
+                # when it recovers, it only sees STARTED
+                # so it will ask payment if it has seen the idempotency key order_id, to which it will say yes
+                # either this or it checks status_stock to see if it is false
+                # it then sends the rollback again. payment checks if it has already done this or not.
+                self.recovery_logger.write_to_log(order_id, "COMPLETED", 400)
 
 
         return order_entry
