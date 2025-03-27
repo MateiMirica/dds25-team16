@@ -73,10 +73,9 @@ batch_create_stock_lua_script = db.register_script(
 
     local kv_pairs = {}
     for i=0,n-1 do
-        kv_pairs[tostring(i)] = cmsgpack.pack({stock=starting_stock, price=item_price})
+        redis.call("SET", tostring(i), cmsgpack.pack({stock=starting_stock, price=item_price}))
     end
     
-    redis.call("MSET", unpack(kv_pairs))
     return "SUCCESS"
     """
 )

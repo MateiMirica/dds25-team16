@@ -73,10 +73,9 @@ batch_create_user_lua_script = db.register_script(
     local kv_pairs = {}
 
     for i=0,n-1 do
-        kv_pairs[tostring(i)] = cmsgpack.pack({credit=starting_money})
+        redis.call("SET", tostring(i), cmsgpack.pack({credit=starting_money}))
     end
 
-    redis.call("MSET", unpack(kv_pairs))
     return "SUCCESS"
     """
 )
