@@ -34,10 +34,12 @@ class StockWorker():
                 local amount = tonumber(ARGV[i])
                 local data = redis.call("GET", key)
                 if not data then
+                    redis.call("SET", "order:" .. tostring(ARGV[n+1]), cmsgpack.pack("REJECTED"))
                     return "ITEM_NOT_FOUND"
                 end
                 local item = cmsgpack.unpack(data)
                 if item.stock < amount then
+                    redis.call("SET", "order:" .. tostring(ARGV[n+1]), cmsgpack.pack("REJECTED"))
                     return "INSUFFICIENT_STOCK"
                 end
             end
@@ -49,6 +51,7 @@ class StockWorker():
                 item.stock = item.stock - amount
                 redis.call("SET", key, cmsgpack.pack(item))
             end
+            redis.call("SET", "order:" .. tostring(ARGV[n+1]), cmsgpack.pack("PAID"))
             return "SUCCESS"
             """
         )
@@ -60,6 +63,7 @@ class StockWorker():
                 local key = KEYS[i]
                 local data = redis.call("GET", key)
                 if not data then
+                    redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("REJECTED"))
                     return "ITEM_NOT_FOUND"
                 end
             end
@@ -71,6 +75,7 @@ class StockWorker():
                 item.stock = item.stock + amount
                 redis.call("SET", key, cmsgpack.pack(item))
             end
+            redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("ROLLBACKED"))
             return "SUCCESS"
             """
         )
@@ -98,7 +103,7 @@ class StockWorker():
         for item_id, amount in items.items():
             keys.append(item_id)
             args.append(str(amount))
-        
+        args.append(orderId)
         self.logger.debug(f"Attempting to rollback stock for order {orderId} on items: {items}")
         try:
             result = self.rollback_lua_script(keys=keys, args=args)
@@ -120,7 +125,7 @@ class StockWorker():
         for item_id, amount in items.items():
             keys.append(item_id)
             args.append(str(amount))
-
+        args.append(orderId)
         self.logger.debug(f"Attempting to subtract stock for order {orderId} on items: {items}")
         try:
             result = self.transaction_lua_script(keys=keys, args=args)
