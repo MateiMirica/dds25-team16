@@ -37,13 +37,14 @@ class RecoveryLogger:
             print(e)
             return None
 
-    def get_unfinished_orders(self):
+    def get_unfinished_orders(self) -> list[str]:
         try:
             with open(self.file_path, "r") as file:
                 data = json.load(file)
                 unfinished_orders = [
                     order_id for order_id, status in data.items() if status == "STARTED"
                 ]
+                return unfinished_orders
         except Exception as e:
             print(e)
             return []
