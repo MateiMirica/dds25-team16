@@ -48,3 +48,11 @@ class RecoveryLogger:
         except Exception as e:
             print(e)
             return []
+
+    def cleanup(self):
+        try:
+            with open(self.file_path, "w") as file:
+                file.write(json.dumps({}))
+                file.flush()
+        except Exception as e:
+            print(e)

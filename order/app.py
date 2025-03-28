@@ -36,6 +36,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 orderWorker = OrderWorker(logger, db, router)
 
+@app.on_event("startup")
+async def startup():
+    await orderWorker.repair_state()
+
 @app.post('/create/{user_id}')
 def create_order(user_id: str):
     key = str(uuid.uuid4())

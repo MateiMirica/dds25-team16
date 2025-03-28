@@ -39,22 +39,23 @@ class OrderWorker():
                               port=int(os.environ['REDIS_PORT']),
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
+        self.logger.info("RESTARTING")
         for order_id in self.emergency_orders:
             payment_status = msgpack.decode(pay_db.get("order:"+ order_id))
             stock_status = msgpack.decode(stock_db.get("order:"+ order_id))
 
+            order_entry: OrderValue = self.get_order_from_db(order_id)
             if payment_status == "PAID" and stock_status == "PAID":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-                order_entry: OrderValue = self.get_order_from_db(order_id)
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
             elif stock_status == "REJECTED" and payment_status == "PAID":
-                self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             elif stock_status == "REJECTED" and payment_status == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             elif payment_status == "PAID" and stock_status == None:
-                self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             elif payment_status == "ROLLEDBACK" and stock_status == None:
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")

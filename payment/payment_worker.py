@@ -53,6 +53,11 @@ class PaymentWorker():
         if not user_data then
             return "USER_NOT_FOUND"
         end
+        
+        local order_data = redis.call("GET", "order:" .. orderId)
+        if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
+          return "SUCCESS"
+        end
 
         local user = cmsgpack.unpack(user_data)
 

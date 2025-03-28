@@ -67,6 +67,10 @@ class StockWorker():
                     return "ITEM_NOT_FOUND"
                 end
             end
+            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
+                return "SUCCESS"
+            end
             for i = 1, n do
                 local key = KEYS[i]
                 local amount = tonumber(ARGV[i])
