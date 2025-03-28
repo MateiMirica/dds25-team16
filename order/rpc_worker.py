@@ -26,10 +26,10 @@ class RPCWorker:
         elif message["status"] is True:
             if self.reply_topic == "ReplyResponsePayment":
                 await self.request_no_response(json.dumps(message), "RollbackPayment")
-                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED", 400)
+                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED")
             elif self.reply_topic == "ReplyResponseStock":
                 await self.request_no_response(json.dumps(message), "RollbackStock")
-                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED", 400)
+                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED")
 
 
     async def request(

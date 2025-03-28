@@ -22,10 +22,10 @@ class RecoveryLogger:
             print(e)
             return {}
 
-    def write_to_log(self, order_id: str, status: str, status_code: int):
+    def write_to_log(self, order_id: str, status: str):
         log = self.__load_data()
         with open(self.file_path, 'w') as file:
-            log[order_id] = {"status": status, "status_code": status_code}
+            log[order_id] = status
             file.write(json.dumps(log, indent=2))
             file.flush()
 
@@ -36,3 +36,14 @@ class RecoveryLogger:
         except Exception as e:
             print(e)
             return None
+
+    def get_unfinished_orders(self):
+        try:
+            with open(self.file_path, "r") as file:
+                data = json.load(file)
+                unfinished_orders = [
+                    order_id for order_id, status in data.items() if status == "STARTED"
+                ]
+        except Exception as e:
+            print(e)
+            return []

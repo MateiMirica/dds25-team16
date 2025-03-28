@@ -26,6 +26,13 @@ class OrderWorker():
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
         self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
         self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
+        self.emergency_orders = self.recovery_logger.get_unfinished_orders()
+
+    async def repair_state(self):
+        for order in self.emergency_orders:
+            # await ask_payment_if_they_saw_idempotency_key
+            # await ask_stock_if_they_saw_idempotency_key
+            pass
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -62,14 +69,14 @@ class OrderWorker():
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if order_entry.paid is True:
             return order_entry
-        self.recovery_logger.write_to_log(order_id, "STARTED", -1)
+        self.recovery_logger.write_to_log(order_id, "STARTED")
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
         if status_payment["status"] is True:
             status_stock = await self.create_message_and_send('UpdateStock', order_id, order_entry)
             if status_stock["status"] is True:
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
-                self.recovery_logger.write_to_log(order_id, "COMPLETED", 200)
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 # if order dies here
@@ -77,7 +84,7 @@ class OrderWorker():
                 # so it will ask payment if it has seen the idempotency key order_id, to which it will say yes
                 # either this or it checks status_stock to see if it is false
                 # it then sends the rollback again. payment checks if it has already done this or not.
-                self.recovery_logger.write_to_log(order_id, "COMPLETED", 400)
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
 
 
         return order_entry
