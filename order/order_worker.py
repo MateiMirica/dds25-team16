@@ -40,26 +40,34 @@ class OrderWorker():
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
         self.logger.info("RESTARTING")
+
+        self.logger.info("EMERGENCY ORDERS")
+        self.logger.info(self.emergency_orders)
+        self.logger.info("REPAIRING STATE")
         for order_id in self.emergency_orders:
-            payment_status = msgpack.decode(pay_db.get("order:"+ order_id))
-            stock_status = msgpack.decode(stock_db.get("order:"+ order_id))
+
+            payment_status = pay_db.get("order:"+ order_id)
+            stock_status = stock_db.get("order:"+ order_id)
 
             order_entry: OrderValue = self.get_order_from_db(order_id)
-            if payment_status == "PAID" and stock_status == "PAID":
+            if payment_status and stock_status and msgpack.decode(payment_status) == "PAID" and msgpack.decode(stock_status) == "PAID":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
+                self.logger.info("COMPLETED")
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
-            elif stock_status == "REJECTED" and payment_status == "PAID":
+            elif payment_status and stock_status and msgpack.decode(stock_status) == "REJECTED" and msgpack.decode(payment_status) == "PAID":
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                self.logger.info("ROLLBACK PAYMENT")
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif stock_status == "REJECTED" and payment_status == "ROLLEDBACK":
+            elif payment_status and stock_status and msgpack.decode(stock_status) == "REJECTED" and msgpack.decode(payment_status) == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "PAID" and stock_status == None:
+            elif payment_status and msgpack.decode(payment_status) == "PAID" and stock_status == None:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                self.logger.info("ROLLBACK PAYMENT")
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "ROLLEDBACK" and stock_status == None:
+            elif payment_status and msgpack.decode(payment_status) == "ROLLEDBACK" and stock_status == None:
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "ROLLEDBACK" and stock_status == "ROLLEDBACK":
+            elif payment_status and stock_status and msgpack.decode(payment_status) == "ROLLEDBACK" and msgpack.decode(stock_status) == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             ##elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
             ## cine face asta?
