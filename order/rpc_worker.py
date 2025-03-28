@@ -54,6 +54,7 @@ class RPCWorker:
             self.responses.pop(correlation_id, None)
             msg = dict()
             msg["status"] = False
+            msg["timeout"] = True
             return json.dumps(msg).encode("utf-8")
         else:
             return response

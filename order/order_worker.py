@@ -1,5 +1,6 @@
 import redis
 import json
+import requests
 from msgspec import msgpack, Struct
 from collections import defaultdict
 from RecoveryLogger import RecoveryLogger
@@ -29,10 +30,41 @@ class OrderWorker():
         self.emergency_orders = self.recovery_logger.get_unfinished_orders()
 
     async def repair_state(self):
-        for order in self.emergency_orders:
-            # await ask_payment_if_they_saw_idempotency_key
-            # await ask_stock_if_they_saw_idempotency_key
-            pass
+        pay_db: redis.Redis = redis.Redis(host="payment-db",
+                              port=int(os.environ['REDIS_PORT']),
+                              password=os.environ['REDIS_PASSWORD'],
+                              db=int(os.environ['REDIS_DB']))
+
+        stock_db: redis.Redis = redis.Redis(host="stock-db",
+                              port=int(os.environ['REDIS_PORT']),
+                              password=os.environ['REDIS_PASSWORD'],
+                              db=int(os.environ['REDIS_DB']))
+        for order_id in self.emergency_orders:
+            payment_status = msgpack.decode(pay_db.get("order:"+ order_id))
+            stock_status = msgpack.decode(stock_db.get("order:"+ order_id))
+
+            if payment_status == "PAID" and stock_status == "PAID":
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+                order_entry: OrderValue = self.get_order_from_db(order_id)
+                order_entry.paid = True
+                self.db.set(order_id, msgpack.encode(order_entry))
+            elif stock_status == "REJECTED" and payment_status == "PAID":
+                self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            elif stock_status == "REJECTED" and payment_status == "ROLLEDBACK":
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            elif payment_status == "PAID" and stock_status == None:
+                self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            elif payment_status == "ROLLEDBACK" and stock_status == None:
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            elif payment_status == "ROLLEDBACK" and stock_status == "ROLLEDBACK":
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            ##elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
+            ## cine face asta?
+            ## daca am dat rollback la payment, dar am dat timeout la stock
+            ## ce se intampla?
+        pass
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -79,11 +111,7 @@ class OrderWorker():
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
-                # if order dies here
-                # when it recovers, it only sees STARTED
-                # so it will ask payment if it has seen the idempotency key order_id, to which it will say yes
-                # either this or it checks status_stock to see if it is false
-                # it then sends the rollback again. payment checks if it has already done this or not.
+                # OK should this be handled in the recovery?
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
 
 

@@ -59,7 +59,7 @@ class PaymentWorker():
         user.credit = user.credit + amount
 
         redis.call("SET", userId, cmsgpack.pack(user))
-        redis.call("SET", "order:" .. orderId, cmsgpack.pack("ROLLBACKED"))
+        redis.call("SET", "order:" .. orderId, cmsgpack.pack("ROLLEDBACK"))
         return "SUCCESS"
         """)
 
