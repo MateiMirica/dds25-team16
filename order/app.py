@@ -52,6 +52,33 @@ def close_db_connection():
 
 atexit.register(close_db_connection)
 
+batch_create_order_lua_script = db.register_script(""""
+local n = tonumber(ARGV[1])
+local n_items = tonumber(ARGV[2])
+local n_users = tonumber(ARGV[3])
+local item_price = tonumber(ARGV[4])
+
+math.randomseed(os.time())
+
+for i = 0, n - 1 do
+    local user_id = tostring(math.random(0, n_users - 1))
+    local item1_id = tostring(math.random(0, n_items - 1))
+    local item2_id = tostring(math.random(0, n_items - 1))
+    
+    local entry = {
+        paid = false,
+        status = "pending",
+        items = { {item1_id, 1}, {item2_id, 1} },
+        user_id = user_id,
+        total_cost = 2 * item_price
+    }
+    
+    redis.call("SET", tostring(i), cmsgpack.pack(entry))
+end
+
+return "SUCCESS"
+""")
+
 @app.post('/create/{user_id}')
 def create_order(user_id: str):
     key = str(uuid.uuid4())
@@ -71,21 +98,8 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
     n_users = int(n_users)
     item_price = int(item_price)
 
-    def generate_entry() -> OrderValue:
-        user_id = random.randint(0, n_users - 1)
-        item1_id = random.randint(0, n_items - 1)
-        item2_id = random.randint(0, n_items - 1)
-        value = OrderValue(paid=False,
-                           status="pending",
-                           items=[(f"{item1_id}", 1), (f"{item2_id}", 1)],
-                           user_id=f"{user_id}",
-                           total_cost=2*item_price)
-        return value
-
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(generate_entry())
-                                  for i in range(n)}
     try:
-        db.mset(kv_pairs)
+        batch_create_order_lua_script(keys=[], args=[n, n_items, n_users, item_price])
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for orders successful"}
