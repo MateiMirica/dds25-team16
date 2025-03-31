@@ -7,14 +7,15 @@ from RecoveryLogger import RecoveryLogger
 import os
 
 class RPCWorker:
-    def __init__(self, router: KafkaRouter, reply_topic: str, unique_group_id: str) -> None:
+    def __init__(self, router: KafkaRouter, reply_topic: str, unique_group_id: str, recovery_logger: RecoveryLogger) -> None:
         self.responses: dict[str, Future[bytes]] = {}
         self.router = router
         self.unique_group_id = unique_group_id
         self.reply_topic = reply_topic + f"{unique_group_id}"
         self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
-        self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
+        # self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
+        self.recovery_logger = recovery_logger
 
     async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)

@@ -69,7 +69,7 @@ def parse_log(tmp_dir, prior_user_state: Dict[str, int]):
                 if status == 'SUCCESS':
                     i += 1
                     prior_user_state[user_id] = prior_user_state[user_id] - ITEM_PRICE
-    logger.info(f"Stock service inconsistencies in the logs: {i - (NUMBER_0F_ITEMS * ITEM_STARTING_STOCK)}")
+    logger.info(f"Items that were not bought as written in the logs: {i - (NUMBER_0F_ITEMS * ITEM_STARTING_STOCK)}")
     return prior_user_state
 
 
@@ -79,9 +79,11 @@ async def verify_systems_consistency(tmp_dir: str, item_ids, user_ids):
         uic: dict = await get_user_credit_dict(session, user_ids)
         iis: dict = await get_item_stock_dict(session, item_ids)
     server_side_items_bought: int = (NUMBER_0F_ITEMS * ITEM_STARTING_STOCK) - list(iis.values())[0]
-    logger.info(f"Stock service inconsistencies in the database: "
+    # logger.info(f"Stock service inconsistencies in the database: "
+    logger.info(f"Items that were not bought " +
                 f"{server_side_items_bought - (NUMBER_0F_ITEMS * ITEM_STARTING_STOCK)}")
     logged_user_credit: int = sum(pus.values())
+    CORRECT_USER_STATE = (NUMBER_OF_USERS * USER_STARTING_CREDIT) - (server_side_items_bought * ITEM_PRICE)
     logger.info(f"Payment service inconsistencies in the logs: {abs(CORRECT_USER_STATE - logged_user_credit)}")
     server_side_user_credit: int = sum(list(uic.values()))
     logger.info(f"Payment service inconsistencies in the database: {abs(CORRECT_USER_STATE - server_side_user_credit)}")

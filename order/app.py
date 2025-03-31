@@ -1,8 +1,11 @@
+import asyncio
 import logging
 import os
 import atexit
 import random
 import uuid
+from contextlib import asynccontextmanager
+
 import redis
 import requests
 import uvicorn
@@ -19,26 +22,35 @@ REQ_ERROR_STR = "Requests error"
 
 GATEWAY_URL = os.environ['GATEWAY_URL']
 
-app = FastAPI(title="order-service")
 router = KafkaRouter("kafka:9092", logger=None)
-app.include_router(router)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
                               port=int(os.environ['REDIS_PORT']),
                               password=os.environ['REDIS_PASSWORD'],
                               db=int(os.environ['REDIS_DB']))
+orderWorker = OrderWorker(logger, db, router)
+
+
+async def after_startup_callback(app):
+    await router.broker.connect()
+    await orderWorker.repair_state()
+    return {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(orderWorker.recovery_logger.file_path)
+    router.after_startup(after_startup_callback)
+    yield
+
+app = FastAPI(title="order-service")
+app.include_router(router)
 
 def close_db_connection():
     db.close()
 
 atexit.register(close_db_connection)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-orderWorker = OrderWorker(logger, db, router)
-
-@app.on_event("startup")
-async def startup():
-    await orderWorker.repair_state()
 
 @app.post('/create/{user_id}')
 def create_order(user_id: str):
@@ -125,6 +137,8 @@ def add_item(order_id: str, item_id: str, quantity: int):
         db.set(order_id, msgpack.encode(order_entry))
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
+    except Exception:
+        raise HTTPException(409, REQ_ERROR_STR)
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
                     status_code=200)
 

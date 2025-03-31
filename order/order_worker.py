@@ -11,6 +11,9 @@ import os
 class OrderDBError(Exception):
     """Custom exception for db errors."""
 
+class EmergencyStateError(Exception):
+    """Custom exception for emergency state errors."""
+
 class OrderValue(Struct):
     paid: bool
     items: list[tuple[str, int]]
@@ -24,10 +27,17 @@ class OrderWorker():
         self.db = db
         self.router = router
         self.unique_group_id = f"order_worker_{os.environ["HOSTNAME"]}"
-        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
-        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
         self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
+        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id, self.recovery_logger)
+        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id, self.recovery_logger
+                                      )
+        self.in_emergency_state = True
         self.emergency_orders = self.recovery_logger.get_unfinished_orders()
+        # self.router.after_startup(self.after_startup_callback)
+    #
+    # async def after_startup_callback(self, app):
+    #     await self.repair_state()
+    #     return {}
 
     async def repair_state(self):
         pay_db: redis.Redis = redis.Redis(host="payment-db",
@@ -45,35 +55,38 @@ class OrderWorker():
         self.logger.info(self.emergency_orders)
         self.logger.info("REPAIRING STATE")
         for order_id in self.emergency_orders:
-
             payment_status = pay_db.get("order:"+ order_id)
             stock_status = stock_db.get("order:"+ order_id)
+            payment_status = msgpack.decode(payment_status) if payment_status is not None else None
+            stock_status = msgpack.decode(stock_status) if stock_status is not None else None
 
             order_entry: OrderValue = self.get_order_from_db(order_id)
-            if payment_status and stock_status and msgpack.decode(payment_status) == "PAID" and msgpack.decode(stock_status) == "PAID":
+            self.logger.info('right after this')
+            await self.create_message_and_send('aaa', None, None)
+            if payment_status == "PAID" and stock_status == "PAID":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
                 self.logger.info("COMPLETED")
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
-            elif payment_status and stock_status and msgpack.decode(stock_status) == "REJECTED" and msgpack.decode(payment_status) == "PAID":
+            elif stock_status == "REJECTED" and payment_status == "PAID":
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.logger.info("ROLLBACK PAYMENT")
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status and stock_status and msgpack.decode(stock_status) == "REJECTED" and msgpack.decode(payment_status) == "ROLLEDBACK":
+            elif stock_status == "REJECTED" and payment_status == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status and msgpack.decode(payment_status) == "PAID" and stock_status == None:
+            elif payment_status == "PAID" and stock_status is None:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.logger.info("ROLLBACK PAYMENT")
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status and msgpack.decode(payment_status) == "ROLLEDBACK" and stock_status == None:
+            elif payment_status == "ROLLEDBACK" and stock_status is None:
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status and stock_status and msgpack.decode(payment_status) == "ROLLEDBACK" and msgpack.decode(stock_status) == "ROLLEDBACK":
+            elif payment_status == "ROLLEDBACK" and stock_status == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             ##elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
             ## cine face asta?
             ## daca am dat rollback la payment, dar am dat timeout la stock
             ## ce se intampla?
-        pass
+        self.in_emergency_state = False
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -98,6 +111,10 @@ class OrderWorker():
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
                 return None
+            # case _:
+            #     self.logger.info("this should come")
+            #     msg["orderId"] = "aaa"
+            #     await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -106,6 +123,10 @@ class OrderWorker():
         return items_quantities
 
     async def checkout(self, order_id: str):
+        # while self.in_emergency_state:
+        #     pass
+        # if self.in_emergency_state:
+        #     raise EmergencyStateError() # do not accept requests while repairing state
         self.logger.debug(f"Checking out {order_id}")
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if order_entry.paid is True:
@@ -117,11 +138,12 @@ class OrderWorker():
             if status_stock["status"] is True:
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+                # self.recovery_logger.write_to_log(order_id, "COMPLETED")
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 # OK should this be handled in the recovery?
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+                # self.recovery_logger.write_to_log(order_id, "COMPLETED") # WRONG - IF WE ROLLBACK BECAUSE STOCK TIMES OUT ITS NOT YET COMPLETE
+        self.recovery_logger.write_to_log(order_id, "COMPLETED")
 
 
         return order_entry
