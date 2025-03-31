@@ -1,7 +1,6 @@
 import json
 import os
 
-
 class RecoveryLogger:
     def __init__(self, output_file_path):
         self.file_path = output_file_path
@@ -11,22 +10,13 @@ class RecoveryLogger:
         print(self.file_path)
         if not os.path.exists(self.file_path):
             with open(self.file_path, "w") as file:
-                file.write(json.dumps({}))
+                file.write("")
                 file.flush()
 
-    def __load_data(self):
-        try:
-            with open(self.file_path, "r") as file:
-                return json.load(file)
-        except Exception as e:
-            print(e)
-            return {}
-
     def write_to_log(self, order_id: str, status: str):
-        log = self.__load_data()
-        with open(self.file_path, 'w') as file:
-            log[order_id] = status
-            file.write(json.dumps(log, indent=2))
+        log_entry = {order_id: status}
+        with open(self.file_path, "a") as file:
+            file.write(json.dumps(log_entry) + '\n')
             file.flush()
 
     def find_order(self, order_id):
@@ -40,11 +30,14 @@ class RecoveryLogger:
     def get_unfinished_orders(self) -> list[str]:
         try:
             with open(self.file_path, "r") as file:
+                d = set()
                 data = json.load(file)
-                unfinished_orders = [
-                    order_id for order_id, status in data.items() if status == "STARTED"
-                ]
-                return unfinished_orders
+                for order_id, status in data.items():
+                    if status == "STARTED":
+                        d.add(order_id)
+                    elif order_id in d and status == "COMPLETED":
+                        d.remove(order_id)
+                return list(d)
         except Exception as e:
             print(e)
             return []
