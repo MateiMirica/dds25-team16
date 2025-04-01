@@ -30,17 +30,21 @@ class RecoveryLogger:
     def get_unfinished_orders(self) -> list[str]:
         try:
             with open(self.file_path, "r") as file:
-                d = set()
-                data = json.load(file)
-                for order_id, status in data.items():
-                    if status == "STARTED":
-                        d.add(order_id)
-                    elif order_id in d and status == "COMPLETED":
-                        d.remove(order_id)
-                return list(d)
+                incomplete_orders = set()
+                for line in file:
+                    try:
+                        data = json.loads(line.strip())
+                        for order_id, status in data.items():
+                            if status == "STARTED":
+                                incomplete_orders.add(order_id)
+                            elif status == "COMPLETED":
+                                incomplete_orders.discard(order_id)
+                    except json.JSONDecodeError as e:
+                        raise e
+                return list(incomplete_orders)
         except Exception as e:
             print(e)
-            return []
+            raise e
 
     def cleanup(self):
         try:

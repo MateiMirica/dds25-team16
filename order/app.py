@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     router.after_startup(after_startup_callback)
     yield
 
-app = FastAPI(title="order-service")
+app = FastAPI(title="order-service", lifespan=lifespan)
 app.include_router(router)
 
 def close_db_connection():

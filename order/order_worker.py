@@ -40,29 +40,25 @@ class OrderWorker():
     #     return {}
 
     async def repair_state(self):
-        pay_db: redis.Redis = redis.Redis(host="payment-db",
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
-
-        stock_db: redis.Redis = redis.Redis(host="stock-db",
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
         self.logger.info("RESTARTING")
 
         self.logger.info("EMERGENCY ORDERS")
         self.logger.info(self.emergency_orders)
         self.logger.info("REPAIRING STATE")
+
+        # self.logger.info('right after this')
+        # await self.create_message_and_send('aaa', None, None)
+
         for order_id in self.emergency_orders:
-            payment_status = pay_db.get("order:"+ order_id)
-            stock_status = stock_db.get("order:"+ order_id)
-            payment_status = msgpack.decode(payment_status) if payment_status is not None else None
-            stock_status = msgpack.decode(stock_status) if stock_status is not None else None
+            
+            payment_data = requests.get(f"{os.environ['GATEWAY_URL']}/payment/checkid/{order_id}").text
+            stock_data = requests.get(f"{os.environ['GATEWAY_URL']}/stock/checkid/{order_id}").text
+            
+            payment_status = json.loads(payment_data)
+            stock_status = json.loads(stock_data)
 
             order_entry: OrderValue = self.get_order_from_db(order_id)
-            self.logger.info('right after this')
-            await self.create_message_and_send('aaa', None, None)
+
             if payment_status == "PAID" and stock_status == "PAID":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
                 self.logger.info("COMPLETED")
@@ -74,15 +70,20 @@ class OrderWorker():
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             elif stock_status == "REJECTED" and payment_status == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "PAID" and stock_status is None:
+            elif payment_status == "PAID" and stock_status == "MISSING":
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.logger.info("ROLLBACK PAYMENT")
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "ROLLEDBACK" and stock_status is None:
+            elif payment_status == "ROLLEDBACK" and stock_status == "MISSING":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
             elif payment_status == "ROLLEDBACK" and stock_status == "ROLLEDBACK":
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            ##elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
+            elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
+                await self.create_message_and_send('RollbackStock', order_id, order_entry)
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            else:
+                self.logger.info("UNKNOWN STATE")
+                self.logger.info(payment_status + " " + stock_status + " " + order_id)
             ## cine face asta?
             ## daca am dat rollback la payment, dar am dat timeout la stock
             ## ce se intampla?
