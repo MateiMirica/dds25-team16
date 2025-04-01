@@ -19,14 +19,6 @@ class RecoveryLogger:
             file.write(json.dumps(log_entry) + '\n')
             file.flush()
 
-    def find_order(self, order_id):
-        try:
-            with open(self.file_path, "r") as file:
-                return json.load(file)[order_id]
-        except Exception as e:
-            print(e)
-            return None
-
     def get_unfinished_orders(self) -> list[str]:
         try:
             with open(self.file_path, "r") as file:

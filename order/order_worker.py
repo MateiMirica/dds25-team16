@@ -11,9 +11,6 @@ import os
 class OrderDBError(Exception):
     """Custom exception for db errors."""
 
-class EmergencyStateError(Exception):
-    """Custom exception for emergency state errors."""
-
 class OrderValue(Struct):
     paid: bool
     items: list[tuple[str, int]]
@@ -29,28 +26,13 @@ class OrderWorker():
         self.unique_group_id = f"order_worker_{os.environ["HOSTNAME"]}"
         self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
         self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id, self.recovery_logger)
-        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id, self.recovery_logger
-                                      )
-        self.in_emergency_state = True
+        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id, self.recovery_logger)
         self.emergency_orders = self.recovery_logger.get_unfinished_orders()
-        # self.router.after_startup(self.after_startup_callback)
-    #
-    # async def after_startup_callback(self, app):
-    #     await self.repair_state()
-    #     return {}
 
     async def repair_state(self):
-        self.logger.info("RESTARTING")
-
-        self.logger.info("EMERGENCY ORDERS")
-        self.logger.info(self.emergency_orders)
         self.logger.info("REPAIRING STATE")
 
-        # self.logger.info('right after this')
-        # await self.create_message_and_send('aaa', None, None)
-
         for order_id in self.emergency_orders:
-            
             payment_data = requests.get(f"{os.environ['GATEWAY_URL']}/payment/checkid/{order_id}").text
             stock_data = requests.get(f"{os.environ['GATEWAY_URL']}/stock/checkid/{order_id}").text
             
@@ -84,10 +66,8 @@ class OrderWorker():
             else:
                 self.logger.info("UNKNOWN STATE")
                 self.logger.info(payment_status + " " + stock_status + " " + order_id)
-            ## cine face asta?
-            ## daca am dat rollback la payment, dar am dat timeout la stock
-            ## ce se intampla?
-        self.in_emergency_state = False
+
+        self.logger.info("FINISHED REPAIRING STATE")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -112,10 +92,6 @@ class OrderWorker():
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
                 return None
-            # case _:
-            #     self.logger.info("this should come")
-            #     msg["orderId"] = "aaa"
-            #     await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -124,10 +100,6 @@ class OrderWorker():
         return items_quantities
 
     async def checkout(self, order_id: str):
-        # while self.in_emergency_state:
-        #     pass
-        # if self.in_emergency_state:
-        #     raise EmergencyStateError() # do not accept requests while repairing state
         self.logger.debug(f"Checking out {order_id}")
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if order_entry.paid is True:
@@ -139,13 +111,9 @@ class OrderWorker():
             if status_stock["status"] is True:
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
-                # self.recovery_logger.write_to_log(order_id, "COMPLETED")
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
-                # OK should this be handled in the recovery?
-                # self.recovery_logger.write_to_log(order_id, "COMPLETED") # WRONG - IF WE ROLLBACK BECAUSE STOCK TIMES OUT ITS NOT YET COMPLETE
         self.recovery_logger.write_to_log(order_id, "COMPLETED")
-
 
         return order_entry
 
