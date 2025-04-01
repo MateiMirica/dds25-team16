@@ -63,6 +63,10 @@ class OrderWorker():
             elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
                 await self.create_message_and_send('RollbackStock', order_id, order_entry)
                 self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            elif payment_status == "MISSING" and stock_status == "MISSING":
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+            elif payment_status == "REJECTED" and stock_status == "MISSING":
+                self.recovery_logger.write_to_log(order_id, "COMPLETED")
             else:
                 self.logger.info("UNKNOWN STATE")
                 self.logger.info(payment_status + " " + stock_status + " " + order_id)
