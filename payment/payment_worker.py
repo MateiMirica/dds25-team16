@@ -3,7 +3,8 @@ import logging
 import redis
 import json
 from msgspec import msgpack, Struct
-from faststream.kafka import KafkaMessage
+from faststream import Context
+from faststream.kafka.message import KafkaMessage
 
 class PaymentDBError(Exception):
     """Custom exception for db errors."""
@@ -11,13 +12,13 @@ class PaymentDBError(Exception):
 class UserValue(Struct):
     credit: int
 
-class PaymentWorker():
+class PaymentWorker:
     def __init__(self, logger, db, router):
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
+        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers", auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers", auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -58,14 +59,18 @@ class PaymentWorker():
         return "SUCCESS"
         """)
 
-    def consume_update(self, msg: str):
+    async def consume_update(self, msg: str):
         msg = json.loads(msg)
-        return self.performTransaction(msg)
+        try:
+            result = await self.performTransaction(msg)
+            return result
+        except Exception as e:
+            self.logger.error(str(e))
+            raise e
 
-    def consume_rollback(self, msg: str):
+    async def consume_rollback(self, msg: str):
         msg = json.loads(msg)
-        logging.getLogger().info(f"ROLLBACK: {msg}")
-        self.performRollback(msg)
+        await self.performRollback(msg)
 
     def get_user_from_db(self, user_id: str) -> UserValue | None:
         try:
@@ -85,7 +90,7 @@ class PaymentWorker():
         msg["status"] = False
         return json.dumps(msg)
 
-    def performTransaction(self, msg):
+    async def performTransaction(self, msg):
         orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
         self.logger.debug(f"Removing {amount} credit from user: {userId}")
 
@@ -105,7 +110,7 @@ class PaymentWorker():
             self.logger.info(f"Payment successful for order {orderId}")
             return self.paymentSuccess(msg)
 
-    def performRollback(self, msg):
+    async def performRollback(self, msg):
         userId, amount = msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
 
@@ -114,7 +119,7 @@ class PaymentWorker():
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
             return
-
+       
         if result == "USER_NOT_FOUND":
             self.logger.error(f"Rollback failed: No user with id {userId}")
             return
