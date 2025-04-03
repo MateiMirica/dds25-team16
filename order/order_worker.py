@@ -21,6 +21,7 @@ class OrderValue(Struct):
     total_cost: int
 
 COMPLETED_ORDER = "COMPLETED"
+STARTED_ORDER = "STARTED"
 
 class OrderWorker():
     def __init__(self, logger, db, router):
@@ -111,7 +112,7 @@ class OrderWorker():
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if order_entry.paid is True:
             return order_entry
-        self.recovery_logger.write_to_log(order_id, "STARTED")
+        self.recovery_logger.write_to_log(order_id, STARTED_ORDER)
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
         if status_payment["status"] is True:
             status_stock = await self.create_message_and_send('UpdateStock', order_id, order_entry)
@@ -120,7 +121,7 @@ class OrderWorker():
                 self.db.set(order_id, msgpack.encode(order_entry))
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
-        self.recovery_logger.write_to_log(order_id, "COMPLETED")
+        self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
 
         return order_entry
 

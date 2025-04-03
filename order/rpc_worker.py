@@ -4,7 +4,6 @@ import json
 from faststream.types import SendableMessage
 from faststream.kafka.fastapi import KafkaRouter
 from RecoveryLogger import RecoveryLogger
-import os
 
 COMPLETED_ORDER = "COMPLETED"
 
