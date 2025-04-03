@@ -44,21 +44,21 @@ services:
     networks:
       - mynetwork
 
-  control-center:
-    image: confluentinc/cp-enterprise-control-center:latest
-    depends_on:
-      - kafka
-    environment:
-      CONTROL_CENTER_BOOTSTRAP_SERVERS: "kafka:29092"
-      CONTROL_CENTER_ZOOKEEPER_CONNECT: "zookeeper:2181"
-      CONTROL_CENTER_STREAMS_NUM_STREAM_THREADS: 1
-      CONTROL_CENTER_REPLICATION_FACTOR: 1
-      CONTROL_CENTER_MODE: "distributed"
-      PORT: 9021
-    ports:
-      - "9021:9021"
-    networks:
-      - mynetwork
+#  control-center:
+#    image: confluentinc/cp-enterprise-control-center:latest
+#    depends_on:
+#      - kafka
+#    environment:
+#      CONTROL_CENTER_BOOTSTRAP_SERVERS: "kafka:29092"
+#      CONTROL_CENTER_ZOOKEEPER_CONNECT: "zookeeper:2181"
+#      CONTROL_CENTER_STREAMS_NUM_STREAM_THREADS: 1
+#      CONTROL_CENTER_REPLICATION_FACTOR: 1
+#      CONTROL_CENTER_MODE: "distributed"
+#      PORT: 9021
+#    ports:
+#      - "9021:9021"
+#    networks:
+#      - mynetwork
 
   init-kafka:
     image: confluentinc/cp-kafka:7.2.0
@@ -91,18 +91,79 @@ services:
     depends_on:
       kafka:
         condition: service_started
-      order-db:
+      order-db-master:
+        condition: service_started
+      order-db-replica:
+        condition: service_started
+      order-sentinel1:
+        condition: service_started
+      order-sentinel2:
+        condition: service_started
+      order-sentinel3:
         condition: service_started
       init-kafka:
         condition: service_completed_successfully
     networks:
       - mynetwork
 
-  order-db:
+  order-db-master:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    container_name: order-db-master
+    command: redis-server --requirepass redis --maxmemory 512mb --masterauth redis
     ports:
       - "8001:6379"
+    networks:
+      - mynetwork
+
+  order-db-replica:
+    image: redis:7.2-bookworm
+    container_name: order-db-replica
+    depends_on:
+      - order-db-master
+    command: >
+      sh -c "redis-server --replicaof order-db-master 6379 --requirepass redis --masterauth redis"
+    networks:
+      - mynetwork
+
+  order-sentinel1:
+    image: redis:7.2-bookworm
+    container_name: order-sentinel1
+    depends_on:
+      - order-db-master
+      - order-db-replica
+    volumes:
+      - ./env/order_sentinel1.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26379:26379"
+    networks:
+      - mynetwork
+
+  order-sentinel2:
+    image: redis:7.2-bookworm
+    container_name: order-sentinel2
+    depends_on:
+      - order-db-master
+      - order-db-replica
+    volumes:
+      - ./env/order_sentinel2.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26380:26379"
+    networks:
+      - mynetwork
+
+  order-sentinel3:
+    image: redis:7.2-bookworm
+    container_name: order-sentinel3
+    depends_on:
+      - order-db-master
+      - order-db-replica
+    volumes:
+      - ./env/order_sentinel3.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26381:26379"
     networks:
       - mynetwork
 
@@ -115,16 +176,80 @@ services:
     depends_on:
       kafka:
         condition: service_started
-      stock-db:
+      stock-db-master:
+        condition: service_started
+      stock-db-replica:
+        condition: service_started
+      stock-sentinel1:
+        condition: service_started
+      stock-sentinel2:
+        condition: service_started
+      stock-sentinel3:
         condition: service_started
       init-kafka:
         condition: service_completed_successfully
     networks:
       - mynetwork
 
-  stock-db:
+
+  stock-db-master:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    container_name: stock-db-master
+    command: redis-server --requirepass redis --maxmemory 512mb --masterauth redis
+    ports:
+      - "8002:6379"
+    networks:
+      - mynetwork
+
+  stock-db-replica:
+    image: redis:7.2-bookworm
+    container_name: stock-db-replica
+    depends_on:
+      - stock-db-master
+    command: >
+      sh -c "redis-server --replicaof stock-db-master 6379 --requirepass redis --masterauth redis"
+    networks:
+      - mynetwork
+
+  stock-sentinel1:
+    image: redis:7.2-bookworm
+    container_name: stock-sentinel1
+    depends_on:
+      - stock-db-master
+      - stock-db-replica
+    volumes:
+      - ./env/stock_sentinel1.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26382:26379"
+    networks:
+      - mynetwork
+
+  stock-sentinel2:
+    image: redis:7.2-bookworm
+    container_name: stock-sentinel2
+    depends_on:
+      - stock-db-master
+      - stock-db-replica
+    volumes:
+      - ./env/stock_sentinel2.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26383:26379"
+    networks:
+      - mynetwork
+
+  stock-sentinel3:
+    image: redis:7.2-bookworm
+    container_name: stock-sentinel3
+    depends_on:
+      - stock-db-master
+      - stock-db-replica
+    volumes:
+      - ./env/stock_sentinel3.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26384:26379"
     networks:
       - mynetwork
 
@@ -137,18 +262,82 @@ services:
     depends_on:
       kafka:
         condition: service_started
-      payment-db:
+      payment-db-master:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
+      payment-sentinel1:
+        condition: service_started
+      payment-sentinel2:
+        condition: service_started
+      payment-sentinel3:
         condition: service_started
       init-kafka:
         condition: service_completed_successfully
     networks:
       - mynetwork
 
-  payment-db:
+  payment-db-master:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    container_name: payment-db-master
+    command: redis-server --requirepass redis --maxmemory 512mb --masterauth redis
+    ports:
+      - "8003:6379"
     networks:
       - mynetwork
+
+  payment-db-replica:
+    image: redis:7.2-bookworm
+    container_name: payment-db-replica
+    depends_on:
+      - payment-db-master
+    command: >
+      sh -c "redis-server --replicaof payment-db-master 6379 --requirepass redis --masterauth redis"
+    networks:
+      - mynetwork
+
+  payment-sentinel1:
+    image: redis:7.2-bookworm
+    container_name: payment-sentinel1
+    depends_on:
+      - payment-db-master
+      - payment-db-replica
+    volumes:
+      - ./env/payment_sentinel1.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26385:26379"
+    networks:
+      - mynetwork
+
+  payment-sentinel2:
+    image: redis:7.2-bookworm
+    container_name: payment-sentinel2
+    depends_on:
+      - payment-db-master
+      - payment-db-replica
+    volumes:
+      - ./env/payment_sentinel2.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26386:26379"
+    networks:
+      - mynetwork
+
+  payment-sentinel3:
+    image: redis:7.2-bookworm
+    container_name: payment-sentinel3
+    depends_on:
+      - payment-db-master
+      - payment-db-replica
+    volumes:
+      - ./env/payment_sentinel3.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-server /usr/local/etc/redis/sentinel.conf --sentinel
+    ports:
+      - "26387:26379"
+    networks:
+      - mynetwork
+
 
 networks:
   mynetwork:
