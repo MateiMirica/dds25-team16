@@ -10,6 +10,7 @@ from msgspec import msgpack
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from faststream.kafka.fastapi import KafkaRouter
+from redis.sentinel import Sentinel
 
 from payment_worker import PaymentWorker, UserValue
 
@@ -20,10 +21,23 @@ app = FastAPI(title="payment-service")
 router = KafkaRouter("kafka:9092", logger=None)
 app.include_router(router)
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+sentinel_hosts = [
+    (host.split(":")[0], int(host.split(":")[1]))
+    for host in os.environ["REDIS_SENTINEL_HOSTS"].split(",")
+]
+
+sentinel = Sentinel(
+    sentinel_hosts,
+    socket_timeout=0.5,
+    password=os.environ["REDIS_PASSWORD"]
+)
+
+db = sentinel.master_for(
+    os.environ["REDIS_MASTER_NAME"],
+    socket_timeout=0.5,
+    password=os.environ["REDIS_PASSWORD"],
+    db=int(os.environ.get("REDIS_DB", 0))
+)
 
 add_funds_lua_script = db.register_script(
     """

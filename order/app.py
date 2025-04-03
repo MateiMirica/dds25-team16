@@ -14,6 +14,7 @@ from msgspec import msgpack, Struct
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from faststream.kafka.fastapi import KafkaRouter
+from redis.sentinel import Sentinel
 
 from order_worker import OrderWorker, OrderValue
 
@@ -26,13 +27,25 @@ router = KafkaRouter("kafka:9092", logger=None)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+sentinel_hosts = [
+    (host.split(":")[0], int(host.split(":")[1]))
+    for host in os.environ["REDIS_SENTINEL_HOSTS"].split(",")
+]
+
+sentinel = Sentinel(
+    sentinel_hosts,
+    socket_timeout=0.5,
+    password=os.environ["REDIS_PASSWORD"]
+)
+
+db = sentinel.master_for(
+    os.environ["REDIS_MASTER_NAME"],
+    socket_timeout=0.5,
+    password=os.environ["REDIS_PASSWORD"],
+    db=int(os.environ.get("REDIS_DB", 0))
+)
+
 orderWorker = OrderWorker(logger, db, router)
-
-
 async def after_startup_callback(app):
     await router.broker.connect()
     await orderWorker.repair_state()
