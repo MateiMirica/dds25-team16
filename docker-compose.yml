@@ -109,7 +109,7 @@ services:
   order-db-master:
     image: redis:7.2-bookworm
     container_name: order-db-master
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: redis-server --requirepass redis --maxmemory 512mb --masterauth redis
     ports:
       - "8001:6379"
     networks:
@@ -195,7 +195,7 @@ services:
   stock-db-master:
     image: redis:7.2-bookworm
     container_name: stock-db-master
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: redis-server --requirepass redis --maxmemory 512mb --masterauth redis
     ports:
       - "8002:6379"
     networks:
@@ -280,7 +280,7 @@ services:
   payment-db-master:
     image: redis:7.2-bookworm
     container_name: payment-db-master
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: redis-server --requirepass redis --maxmemory 512mb --masterauth redis
     ports:
       - "8003:6379"
     networks:
