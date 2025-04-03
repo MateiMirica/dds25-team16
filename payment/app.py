@@ -6,11 +6,10 @@ import uuid
 import redis
 import uvicorn
 
-from msgspec import msgpack, Struct
+from msgspec import msgpack
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from faststream.kafka.fastapi import KafkaRouter
-
 
 from payment_worker import PaymentWorker, UserValue
 
@@ -102,7 +101,6 @@ def create_user():
 
 @app.get('/checkid/{order_id}')
 def check_order_id(order_id: str):
-    
     order_key = f"order:{order_id}"
     db_key = db.get(order_key)
     if db_key is None:

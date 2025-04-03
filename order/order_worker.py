@@ -7,6 +7,8 @@ from RecoveryLogger import RecoveryLogger
 from rpc_worker import RPCWorker
 import os
 
+from order_status import Status
+
 
 class OrderDBError(Exception):
     """Custom exception for db errors."""
@@ -17,6 +19,8 @@ class OrderValue(Struct):
     status: str
     user_id: str
     total_cost: int
+
+ORDER_COMPLETED = "COMPLETED"
 
 class OrderWorker():
     def __init__(self, logger, db, router):
@@ -36,37 +40,36 @@ class OrderWorker():
             payment_data = requests.get(f"{os.environ['GATEWAY_URL']}/payment/checkid/{order_id}").text
             stock_data = requests.get(f"{os.environ['GATEWAY_URL']}/stock/checkid/{order_id}").text
             
-            payment_status = json.loads(payment_data)
-            stock_status = json.loads(stock_data)
+            payment_status = Status.convertResponseFromDB(json.loads(payment_data))
+            stock_status = Status.convertResponseFromDB(json.loads(stock_data))
 
             order_entry: OrderValue = self.get_order_from_db(order_id)
 
-            if payment_status == "PAID" and stock_status == "PAID":
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-                self.logger.info("COMPLETED")
+            if payment_status == Status.PAID and stock_status == Status.PAID:
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
-            elif stock_status == "REJECTED" and payment_status == "PAID":
+            elif payment_status == Status.PAID and stock_status == Status.REJECTED:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.logger.info("ROLLBACK PAYMENT")
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif stock_status == "REJECTED" and payment_status == "ROLLEDBACK":
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "PAID" and stock_status == "MISSING":
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.REJECTED:
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.PAID and stock_status == Status.MISSING:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.logger.info("ROLLBACK PAYMENT")
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "ROLLEDBACK" and stock_status == "MISSING":
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "ROLLEDBACK" and stock_status == "ROLLEDBACK":
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "ROLLEDBACK" and stock_status == "PAID":
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.MISSING:
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.ROLLEDBACK:
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.PAID:
                 await self.create_message_and_send('RollbackStock', order_id, order_entry)
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "MISSING" and stock_status == "MISSING":
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
-            elif payment_status == "REJECTED" and stock_status == "MISSING":
-                self.recovery_logger.write_to_log(order_id, "COMPLETED")
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.MISSING and stock_status == Status.MISSING:
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
+            elif payment_status == Status.REJECTED and stock_status == Status.MISSING:
+                self.recovery_logger.write_to_log(order_id, ORDER_COMPLETED)
             else:
                 self.logger.info("UNKNOWN STATE")
                 self.logger.info(payment_status + " " + stock_status + " " + order_id)

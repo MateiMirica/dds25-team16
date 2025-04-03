@@ -6,6 +6,8 @@ from faststream.kafka.fastapi import KafkaRouter
 from RecoveryLogger import RecoveryLogger
 import os
 
+COMPLETED_ORDER = "COMPLETED"
+
 class RPCWorker:
     def __init__(self, router: KafkaRouter, reply_topic: str, unique_group_id: str, recovery_logger: RecoveryLogger) -> None:
         self.responses: dict[str, Future[bytes]] = {}
@@ -27,10 +29,10 @@ class RPCWorker:
         elif message["status"] is True:
             if self.reply_topic == "ReplyResponsePayment":
                 await self.request_no_response(json.dumps(message), "RollbackPayment")
-                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED")
+                self.recovery_logger.write_to_log(message["orderId"], COMPLETED_ORDER)
             elif self.reply_topic == "ReplyResponseStock":
                 await self.request_no_response(json.dumps(message), "RollbackStock")
-                self.recovery_logger.write_to_log(message["orderId"], "COMPLETED")
+                self.recovery_logger.write_to_log(message["orderId"], COMPLETED_ORDER)
 
 
     async def request(
