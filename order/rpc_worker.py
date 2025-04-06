@@ -12,7 +12,7 @@ class RPCWorker:
         self.router = router
         self.unique_group_id = unique_group_id
         self.reply_topic = reply_topic + f"{unique_group_id}"
-        self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id)
+        self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id, auto_commit=False)
         self.subscriber(self._handle_responses)
 
     async def _handle_responses(self, msg) -> None:
