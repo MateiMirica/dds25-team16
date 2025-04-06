@@ -69,10 +69,8 @@ class OrderWorker():
 
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
         if status_payment["status"] is True:
-            self.logger.info(f"Actually got a reply from payment for {order_id}")
             status_stock = await self.create_message_and_send('UpdateStock', order_id, order_entry)
             if status_stock["status"] is True:
-                self.logger.info(f"Actually got a reply from stock for {order_id}")
                 order_entry.paid = True
                 self.db.set(order_id, msgpack.encode(order_entry))
             else:

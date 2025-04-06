@@ -61,12 +61,8 @@ class PaymentWorker:
 
     async def consume_update(self, msg: str):
         msg = json.loads(msg)
-        try:
-            result = await self.performTransaction(msg)
-            return result
-        except Exception as e:
-            self.logger.error(str(e))
-            raise e
+        result = await self.performTransaction(msg)
+        return result
 
     async def consume_rollback(self, msg: str):
         msg = json.loads(msg)
