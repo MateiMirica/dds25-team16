@@ -59,14 +59,14 @@ class PaymentWorker:
         return "SUCCESS"
         """)
 
-    async def consume_update(self, msg: str):
+    def consume_update(self, msg: str):
         msg = json.loads(msg)
-        result = await self.performTransaction(msg)
+        result = self.performTransaction(msg)
         return result
 
-    async def consume_rollback(self, msg: str):
+    def consume_rollback(self, msg: str):
         msg = json.loads(msg)
-        await self.performRollback(msg)
+        self.performRollback(msg)
 
     def get_user_from_db(self, user_id: str) -> UserValue | None:
         try:
@@ -86,7 +86,7 @@ class PaymentWorker:
         msg["status"] = False
         return json.dumps(msg)
 
-    async def performTransaction(self, msg):
+    def performTransaction(self, msg):
         orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
         self.logger.debug(f"Removing {amount} credit from user: {userId}")
 
@@ -106,7 +106,7 @@ class PaymentWorker:
             self.logger.info(f"Payment successful for order {orderId}")
             return self.paymentSuccess(msg)
 
-    async def performRollback(self, msg):
+    def performRollback(self, msg):
         userId, amount = msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
 
