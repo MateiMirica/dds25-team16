@@ -3,8 +3,6 @@ import logging
 import redis
 import json
 from msgspec import msgpack, Struct
-from faststream import Context
-from faststream.kafka.message import KafkaMessage
 
 class PaymentDBError(Exception):
     """Custom exception for db errors."""
@@ -61,8 +59,7 @@ class PaymentWorker:
 
     def consume_update(self, msg: str):
         msg = json.loads(msg)
-        result = self.performTransaction(msg)
-        return result
+        return self.performTransaction(msg)
 
     def consume_rollback(self, msg: str):
         msg = json.loads(msg)

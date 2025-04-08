@@ -1,8 +1,6 @@
 import redis
 import json
 from msgspec import msgpack, Struct
-from faststream import Context
-from faststream.kafka import KafkaMessage
 
 
 class StockDBError(Exception):
