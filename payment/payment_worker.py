@@ -137,7 +137,6 @@ class PaymentWorker():
         result = None
         exception = False
         for i in range(10):
-            time.sleep(5)
             try:
                 result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
                 exception = False
@@ -145,6 +144,7 @@ class PaymentWorker():
             except redis.exceptions.RedisError as e:
                 self.logger.error(f"Redis Error: {str(e)}")
                 exception = True
+                time.sleep(2)
 
         if exception:
             return

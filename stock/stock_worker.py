@@ -127,7 +127,6 @@ class StockWorker():
         result = None
         exception = False
         for i in range(10):
-            time.sleep(5)
             try:
                 result = self.rollback_lua_script(keys=keys, args=args)
                 exception = False
@@ -135,6 +134,7 @@ class StockWorker():
             except redis.exceptions.RedisError as e:
                 self.logger.error(f"Redis Error: {str(e)}")
                 exception = True
+                time.sleep(2)
         if exception:
             return
         if result == b"ITEM_NOT_FOUND":
