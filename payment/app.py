@@ -6,7 +6,7 @@ import uuid
 import redis
 import uvicorn
 
-from msgspec import msgpack, Struct
+from msgspec import msgpack
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from faststream.kafka.fastapi import KafkaRouter
@@ -112,6 +112,15 @@ def create_user():
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return {'user_id': key}
+
+@app.get('/checkid/{order_id}')
+def check_order_id(order_id: str):
+    order_key = f"order:{order_id}"
+    db_key = db.get(order_key)
+    if db_key is None:
+        return "MISSING"
+    return_data = msgpack.decode(db_key, type=str)
+    return return_data
 
 
 @app.post('/batch_init/{n}/{starting_money}')

@@ -1,9 +1,13 @@
 import redis
 import json
+import requests
 from msgspec import msgpack, Struct
 from collections import defaultdict
+from RecoveryLogger import RecoveryLogger
 from rpc_worker import RPCWorker
 import os
+
+from order_status import Status
 
 
 class OrderDBError(Exception):
@@ -16,14 +20,62 @@ class OrderValue(Struct):
     user_id: str
     total_cost: int
 
+COMPLETED_ORDER = "COMPLETED"
+STARTED_ORDER = "STARTED"
+
 class OrderWorker():
     def __init__(self, logger, db, router):
         self.logger = logger
         self.db = db
         self.router = router
         self.unique_group_id = f"order_worker_{os.environ["HOSTNAME"]}"
-        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id)
-        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id)
+        self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
+        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id, self.recovery_logger)
+        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id, self.recovery_logger)
+        self.emergency_orders = self.recovery_logger.get_unfinished_orders()
+
+    async def repair_state(self):
+        self.logger.info("REPAIRING STATE")
+
+        for order_id in self.emergency_orders:
+            payment_data = requests.get(f"{os.environ['GATEWAY_URL']}/payment/checkid/{order_id}").text
+            stock_data = requests.get(f"{os.environ['GATEWAY_URL']}/stock/checkid/{order_id}").text
+            
+            payment_status = Status.convertResponseFromDB(json.loads(payment_data))
+            stock_status = Status.convertResponseFromDB(json.loads(stock_data))
+
+            order_entry: OrderValue = self.get_order_from_db(order_id)
+
+            if payment_status == Status.PAID and stock_status == Status.PAID:
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+                order_entry.paid = True
+                self.db.set(order_id, msgpack.encode(order_entry))
+            elif payment_status == Status.PAID and stock_status == Status.REJECTED:
+                await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                self.logger.info("ROLLBACK PAYMENT")
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.REJECTED:
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.PAID and stock_status == Status.MISSING:
+                await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                self.logger.info("ROLLBACK PAYMENT")
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.MISSING:
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.ROLLEDBACK:
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.ROLLEDBACK and stock_status == Status.PAID:
+                await self.create_message_and_send('RollbackStock', order_id, order_entry)
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.MISSING and stock_status == Status.MISSING:
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            elif payment_status == Status.REJECTED and stock_status == Status.MISSING:
+                self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
+            else:
+                self.logger.info("UNKNOWN STATE")
+                self.logger.info(payment_status + " " + stock_status + " " + order_id)
+
+        self.logger.info("FINISHED REPAIRING STATE")
 
     async def create_message_and_send(self, topic: str, order_id: str, order_entry: OrderValue):
         msg = dict()
@@ -48,12 +100,6 @@ class OrderWorker():
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
                 return None
-            # case 'RollbackStock':
-            #     items_quantities = self.get_items_in_order(order_entry)
-            #     msg["orderId"] = order_id
-            #     msg["items"] = items_quantities
-            #     await self.stock_worker.request_no_response(json.dumps(msg), "RollbackStock")
-            #     return None
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
@@ -66,7 +112,7 @@ class OrderWorker():
         order_entry: OrderValue = self.get_order_from_db(order_id)
         if order_entry.paid is True:
             return order_entry
-
+        self.recovery_logger.write_to_log(order_id, STARTED_ORDER)
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
         if status_payment["status"] is True:
             status_stock = await self.create_message_and_send('UpdateStock', order_id, order_entry)
@@ -75,7 +121,7 @@ class OrderWorker():
                 self.db.set(order_id, msgpack.encode(order_entry))
             else:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
-
+        self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
 
         return order_entry
 

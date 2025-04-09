@@ -24,6 +24,7 @@ class PaymentWorker():
 
         self.transaction_lua_script = self.db.register_script("""
         local userId = KEYS[1]
+        local orderId = ARGV[2]
         local amount = tonumber(ARGV[1])
 
         local user_data = redis.call("GET", userId)
@@ -33,21 +34,29 @@ class PaymentWorker():
 
         local user = cmsgpack.unpack(user_data)
         if user.credit < amount then
+            redis.call("SET", "order:" .. orderId, cmsgpack.pack("REJECTED"))
             return "INSUFFICIENT_FUNDS"
         end
 
         user.credit = user.credit - amount
         redis.call("SET", userId, cmsgpack.pack(user))
+        redis.call("SET", "order:" .. orderId, cmsgpack.pack("PAID"))
         return "SUCCESS"
         """)
 
         self.rollback_lua_script = self.db.register_script("""
         local userId = KEYS[1]
+        local orderId = ARGV[2]
         local amount = tonumber(ARGV[1])
 
         local user_data = redis.call("GET", userId)
         if not user_data then
             return "USER_NOT_FOUND"
+        end
+        
+        local order_data = redis.call("GET", "order:" .. orderId)
+        if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
+          return "SUCCESS"
         end
 
         local user = cmsgpack.unpack(user_data)
@@ -55,6 +64,7 @@ class PaymentWorker():
         user.credit = user.credit + amount
 
         redis.call("SET", userId, cmsgpack.pack(user))
+        redis.call("SET", "order:" .. orderId, cmsgpack.pack("ROLLEDBACK"))
         return "SUCCESS"
         """)
 
@@ -90,7 +100,7 @@ class PaymentWorker():
         self.logger.debug(f"Removing {amount} credit from user: {userId}")
 
         try:
-            result = self.transaction_lua_script(keys=[userId], args=[amount])
+            result = self.transaction_lua_script(keys=[userId], args=[amount,orderId])
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
             return self.paymentFailed(msg)
@@ -106,11 +116,11 @@ class PaymentWorker():
             return self.paymentSuccess(msg)
 
     def performRollback(self, msg):
-        userId, amount = msg["userId"], msg["amount"]
+        orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
 
         try:
-            result = self.rollback_lua_script(keys=[userId], args=[amount])
+            result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
             return

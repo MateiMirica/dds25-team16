@@ -1,8 +1,11 @@
+import asyncio
 import logging
 import os
 import atexit
 import random
 import uuid
+from contextlib import asynccontextmanager
+
 import redis
 import requests
 import uvicorn
@@ -20,9 +23,9 @@ REQ_ERROR_STR = "Requests error"
 
 GATEWAY_URL = os.environ['GATEWAY_URL']
 
-app = FastAPI(title="order-service")
 router = KafkaRouter("kafka:9092", logger=None)
-app.include_router(router)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 sentinel_hosts = [
     (host.split(":")[0], int(host.split(":")[1]))
@@ -42,13 +45,52 @@ db = sentinel.master_for(
     db=int(os.environ.get("REDIS_DB", 0))
 )
 
+orderWorker = OrderWorker(logger, db, router)
+async def after_startup_callback(app):
+    await router.broker.connect()
+    await orderWorker.repair_state()
+    return {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(orderWorker.recovery_logger.file_path)
+    router.after_startup(after_startup_callback)
+    yield
+
+app = FastAPI(title="order-service", lifespan=lifespan)
+app.include_router(router)
+
 def close_db_connection():
     db.close()
 
 atexit.register(close_db_connection)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-orderWorker = OrderWorker(logger, db, router)
+
+batch_create_order_lua_script = db.register_script(""""
+local n = tonumber(ARGV[1])
+local n_items = tonumber(ARGV[2])
+local n_users = tonumber(ARGV[3])
+local item_price = tonumber(ARGV[4])
+
+math.randomseed(os.time())
+
+for i = 0, n - 1 do
+    local user_id = tostring(math.random(0, n_users - 1))
+    local item1_id = tostring(math.random(0, n_items - 1))
+    local item2_id = tostring(math.random(0, n_items - 1))
+    
+    local entry = {
+        paid = false,
+        status = "pending",
+        items = { {item1_id, 1}, {item2_id, 1} },
+        user_id = user_id,
+        total_cost = 2 * item_price
+    }
+    
+    redis.call("SET", tostring(i), cmsgpack.pack(entry))
+end
+
+return "SUCCESS"
+""")
 
 @app.post('/create/{user_id}')
 def create_order(user_id: str):
@@ -69,21 +111,8 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
     n_users = int(n_users)
     item_price = int(item_price)
 
-    def generate_entry() -> OrderValue:
-        user_id = random.randint(0, n_users - 1)
-        item1_id = random.randint(0, n_items - 1)
-        item2_id = random.randint(0, n_items - 1)
-        value = OrderValue(paid=False,
-                           status="pending",
-                           items=[(f"{item1_id}", 1), (f"{item2_id}", 1)],
-                           user_id=f"{user_id}",
-                           total_cost=2*item_price)
-        return value
-
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(generate_entry())
-                                  for i in range(n)}
     try:
-        db.mset(kv_pairs)
+        batch_create_order_lua_script(keys=[], args=[n, n_items, n_users, item_price])
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for orders successful"}
@@ -135,6 +164,8 @@ def add_item(order_id: str, item_id: str, quantity: int):
         db.set(order_id, msgpack.encode(order_entry))
     except redis.exceptions.RedisError:
         raise HTTPException(400, DB_ERROR_STR)
+    except Exception:
+        raise HTTPException(409, REQ_ERROR_STR)
     return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
                     status_code=200)
 

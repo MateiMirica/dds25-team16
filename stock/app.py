@@ -115,6 +115,16 @@ def get_item_from_db(item_id: str) -> StockValue | None:
         raise HTTPException(400, f"Item: {item_id} not found!")
     return entry
 
+@app.get('/checkid/{order_id}')
+def check_order_id(order_id: str):
+    
+    order_key = f"order:{order_id}"
+    db_key = db.get(order_key)
+    if db_key is None:
+        return "MISSING"
+    return_data = msgpack.decode(db_key, type=str)
+    return return_data
+
 
 @app.post('/item/create/{price}')
 def create_item(price: int):
