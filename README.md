@@ -10,7 +10,7 @@ Consistency is achieved with the SAGA microservice pattern. Firstly we try to do
 We have identified many failure points in the system. Firstly, consider that each service's database might fail. This was solved by having replicas for the DBs (using Redis Sentinel to take care of replication and fail-over switch). Secondly, some services might fail. For any service we run 4 instances and if 1 such instance fails, then: kafka redistributes its topics to the other runningn instances and the instance that fails uses undo logging to recover when it restarts. 
 
 ### Scalability
-Scalability of the system is ensured by many key elements, such as asynchronous processing via a publisher-subscriber pattern and smart partitionings of kafka topics. 
+Scalability of the system is ensured by many key elements, such as asynchronous processing via a publisher-subscriber pattern and smart partitionings of kafka topics. Using kafka, each `order` service instance maintains it's own topic to handle the saga's that they are responsible for. There is a single topic for sending tasks to `stock` and a single topic for sending tasks to `payment`. We will have as many partitions for this topic as we have consumers to ensure even work distribution. 
 
 ### Project structure
 
