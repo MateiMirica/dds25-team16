@@ -13,6 +13,7 @@ Matei Mihai Mirica:
     - redis sentinel setup
     - order saga worker that awaits completion of sagas with timeouts
     - changed gateway and congestion parameters
+    - fixed issues with fault tolerance inconsistencies
 Stefan Stoicescu:
     - Lua scripts to ensure Redis atomic transactions
     - Order recovery logic

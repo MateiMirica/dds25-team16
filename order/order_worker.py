@@ -30,8 +30,8 @@ class OrderWorker():
         self.router = router
         self.unique_group_id = f"order_worker_{os.environ["HOSTNAME"]}"
         self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
-        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id, self.recovery_logger)
-        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id, self.recovery_logger)
+        self.payment_worker = RPCWorker(router, "ReplyResponsePayment", self.unique_group_id, self.recovery_logger, db)
+        self.stock_worker = RPCWorker(router, "ReplyResponseStock", self.unique_group_id, self.recovery_logger, db)
         self.emergency_orders = self.recovery_logger.get_unfinished_orders()
 
     async def repair_state(self):
@@ -45,6 +45,9 @@ class OrderWorker():
             stock_status = Status.convertResponseFromDB(json.loads(stock_data))
 
             order_entry: OrderValue = self.get_order_from_db(order_id)
+
+            if order_entry.status == "completed":
+                continue
 
             if payment_status == Status.PAID and stock_status == Status.PAID:
                 self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
@@ -110,7 +113,7 @@ class OrderWorker():
     async def checkout(self, order_id: str):
         self.logger.debug(f"Checking out {order_id}")
         order_entry: OrderValue = self.get_order_from_db(order_id)
-        if order_entry.paid is True:
+        if order_entry.status == "completed":
             return order_entry
         self.recovery_logger.write_to_log(order_id, STARTED_ORDER)
         status_payment = await self.create_message_and_send('UpdatePayment', order_id, order_entry)
@@ -118,9 +121,19 @@ class OrderWorker():
             status_stock = await self.create_message_and_send('UpdateStock', order_id, order_entry)
             if status_stock["status"] is True:
                 order_entry.paid = True
-                self.db.set(order_id, msgpack.encode(order_entry))
             else:
+                self.logger.info(f"Rolling back payment for order {order_id}")
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+                if status_stock.get("timeout", False):
+                    self.logger.info(f"Rolling back stock for order {order_id}")
+                    await self.create_message_and_send('RollbackStock', order_id, order_entry)
+
+        elif status_payment.get("timeout", False):
+                self.logger.info(f"Rolling back payment for order {order_id}")
+                await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+
+        order_entry.status = "completed"
+        self.db.set(order_id, msgpack.encode(order_entry))
         self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
 
         return order_entry

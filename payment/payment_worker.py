@@ -17,8 +17,8 @@ class PaymentWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
+        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers",auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers",auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -34,10 +34,17 @@ class PaymentWorker():
         end
         
         local order_data = redis.call("GET", "order:" .. orderId)
+        local rollback_data = redis.call("GET", "rollback:" .. orderId)
+        if rollback_data ~= nil and rollback_data == cmsgpack.pack("attempted") then
+            return "INSUFFICIENT_FUNDS"
+        end
         if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
             return "SUCCESS"
         end
         if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+            return "INSUFFICIENT_FUNDS"
+        end
+        if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
             return "INSUFFICIENT_FUNDS"
         end
         
@@ -57,6 +64,7 @@ class PaymentWorker():
         local userId = KEYS[1]
         local orderId = ARGV[2]
         local amount = tonumber(ARGV[1])
+        redis.call("SET", "rollback:" .. orderId, cmsgpack.pack("attempted"))
 
         local user_data = redis.call("GET", userId)
         if not user_data then
@@ -64,16 +72,14 @@ class PaymentWorker():
         end
         
         local order_data = redis.call("GET", "order:" .. orderId)
-        if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
-          return "SUCCESS"
+        if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+            local user = cmsgpack.unpack(user_data)
+
+            user.credit = user.credit + amount
+    
+            redis.call("SET", userId, cmsgpack.pack(user))
+            redis.call("SET", "order:" .. orderId, cmsgpack.pack("ROLLEDBACK"))
         end
-
-        local user = cmsgpack.unpack(user_data)
-
-        user.credit = user.credit + amount
-
-        redis.call("SET", userId, cmsgpack.pack(user))
-        redis.call("SET", "order:" .. orderId, cmsgpack.pack("ROLLEDBACK"))
         return "SUCCESS"
         """)
 

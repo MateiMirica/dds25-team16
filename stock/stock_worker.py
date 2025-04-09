@@ -23,8 +23,8 @@ class StockWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers")
+        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers",auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers",auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -46,10 +46,17 @@ class StockWorker():
                 end
             end
             local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+            local rollback_data = redis.call("GET", "rollback:" .. ARGV[n+1])
+            if rollback_data ~= nil and rollback_data == cmsgpack.pack("attempted") then
+                return "INSUFFICIENT_STOCK"
+            end
             if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
                 return "SUCCESS"
             end
             if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+                return "INSUFFICIENT_STOCK"
+            end
+            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
                 return "INSUFFICIENT_STOCK"
             end
             for i = 1, n do
@@ -76,19 +83,18 @@ class StockWorker():
                     return "ITEM_NOT_FOUND"
                 end
             end
+            redis.call("SET", "rollback:" .. ARGV[n+1], cmsgpack.pack("attempted"))
             local order_data = redis.call("GET", "order:" .. ARGV[n+1])
-            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
-                return "SUCCESS"
+            if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+                for i = 1, n do
+                    local key = KEYS[i]
+                    local amount = tonumber(ARGV[i])
+                    local data = redis.call("GET", key)
+                    local item = cmsgpack.unpack(data)
+                    item.stock = item.stock + amount
+                    redis.call("SET", key, cmsgpack.pack(item))
+                    redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("ROLLEDBACK"))
             end
-            for i = 1, n do
-                local key = KEYS[i]
-                local amount = tonumber(ARGV[i])
-                local data = redis.call("GET", key)
-                local item = cmsgpack.unpack(data)
-                item.stock = item.stock + amount
-                redis.call("SET", key, cmsgpack.pack(item))
-            end
-            redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("ROLLEDBACK"))
             return "SUCCESS"
             """
         )
@@ -163,7 +169,7 @@ class StockWorker():
             self.logger.error("One or more items were not found during stock update.")
             return self.stockFailed(msg)
         elif result == b"INSUFFICIENT_STOCK":
-            self.logger.info("Insufficient stock available for one or more items.")
+            self.logger.info(f"Insufficient stock available for one or more items for order {orderId}.")
             return self.stockFailed(msg)
         elif result == b"SUCCESS":
             self.logger.info(f"Stock subtraction successful for order {orderId}")
