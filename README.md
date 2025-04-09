@@ -2,15 +2,18 @@
 
 ### How to run the application
 
-run  `docker compose up --scale order-service=4 --scale stock-service=4 --scale payment-service=4 --build -d` to build the app with 4 instances of each service. This can be replaced with whatever number.
+run  `docker compose up --scale order-service=4 --scale stock-service=4 --scale payment-service=4 --build -d` to build the app with 4 instances of each service.
 
 ### Consistency
-Consistency is achieved with the SAGA microservice pattern. Firstly we try to do the payment and then subtract the stock (if the payment was successful). In case the payment goes through, but we find that there isn't engough stock, we apply the compensating transaction for the payment service. To deal with duplicate events in the system we also use idempotency keys for the operations performed by `payment` and `stock` services. The story gets more complicated when we consider possible failures in this distributed transaction.
+Consistency is achieved with the SAGA microservice pattern. Firstly we try to do the payment and then subtract the stock (if the payment was successful). In case the payment goes through, but we find that there isn't enough stock, we apply the compensating transaction for the payment service. To deal with duplicate events in the system we also use idempotency keys for the operations performed by `payment` and `stock` services. The story gets more complicated when we consider possible failures in this distributed transaction.
 ### Fault tolerance
-We have identified many failure points in the system. Firstly, consider that each service's database might fail. This was solved by having replicas for the DBs (using Redis Sentinel to take care of replication and fail-over switch). Secondly, some services might fail. For any service we run 4 instances and if 1 such instance fails, then: kafka redistributes its topics to the other runningn instances and the instance that fails uses undo logging to recover when it restarts. 
+We have identified many failure points in the system. Firstly, consider that each service's database might fail. This was solved by having replicas for the DBs (using Redis Sentinel to take care of replication and fail-over switch). Secondly, some services might fail. If one of the 4 `order` instances fail, the instance that fails uses undo logging to recover when it restarts. If any of the `stock` and `payment` instances fail kafka redistributes its topics to the other running instances.
+
+### Undo logging
+We use undo logging in the `order` service. We write in the log when we start the checkout and write again that the order is completed when the respective saga is finished. In recovery, we go through uncompleted orders. The `stock` and `payment` DBs help us reconstruct what happened with a given saga (if it was completed in both, if it was rolledback in some service but not the other, etc.) and we can change the status of the order in our DB to make sure we stay consistent.
 
 ### Scalability
-Scalability of the system is ensured by many key elements, such as asynchronous processing via a publisher-subscriber pattern and smart partitionings of kafka topics. Using kafka, each `order` service instance maintains it's own topic to handle the saga's that they are responsible for. There is a single topic for sending tasks to `stock` and a single topic for sending tasks to `payment`. We will have as many partitions for this topic as we have consumers to ensure even work distribution. 
+Scalability of the system is ensured by many key elements, such as asynchronous processing via a publisher-subscriber pattern and smart partitioning of kafka topics. Using kafka, each `order` service instance maintains its own topic to handle the saga's that they are responsible for. There is a single topic for sending tasks to `stock` and a single topic for sending tasks to `payment`. We will have as many partitions for this topic as we have consumers to ensure even work distribution. 
 
 ### Project structure
 
