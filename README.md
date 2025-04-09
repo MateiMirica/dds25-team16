@@ -1,11 +1,16 @@
-# Web-scale Data Management Project Template
+# Distributed checkout
 
 ### How to run the application
 
 run  `docker compose up --scale order-service=4 --scale stock-service=4 --scale payment-service=4 --build -d` to build the app with 4 instances of each service. This can be replaced with whatever number.
 
-Basic project structure with Python's Flask and Redis. 
-**You are free to use any web framework in any language and any database you like for this project.**
+### Consistency
+Consistency is achieved with the SAGA microservice pattern. Firstly we try to do the payment and then subtract the stock (if the payment was successful). In case the payment goes through, but we find that there isn't engough stock, we apply the compensating transaction for the payment service. To deal with duplicate events in the system we also use idempotency keys for the operations performed by `payment` and `stock` services. The story gets more complicated when we consider possible failures in this distributed transaction.
+### Fault tolerance
+We have identified many failure points in the system. Firstly, consider that each service's database might fail. This was solved by having replicas for the DBs (using Redis Sentinel to take care of replication and fail-over switch). Secondly, some services might fail. For any service we run 4 instances and if 1 such instance fails, then: kafka redistributes its topics to the other runningn instances and the instance that fails uses undo logging to recover when it restarts. 
+
+### Scalability
+Scalability of the system is ensured by many key elements, such as asynchronous processing via a publisher-subscriber pattern and smart partitionings of kafka topics. 
 
 ### Project structure
 
