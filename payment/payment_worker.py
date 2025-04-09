@@ -1,4 +1,5 @@
 import logging
+import time
 
 import redis
 import json
@@ -16,8 +17,8 @@ class PaymentWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers", auto_commit=False)
-        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers", auto_commit=False)
+        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers")
+        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -127,12 +128,25 @@ class PaymentWorker():
         orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
 
-        try:
-            result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
-        except redis.exceptions.RedisError as e:
-            self.logger.error(f"Redis Error: {str(e)}")
-            return
+        # try:
+        #     result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
+        # except redis.exceptions.RedisError as e:
+        #     self.logger.error(f"Redis Error: {str(e)}")
+        #     return
 
+        exception = False
+        for i in range(10):
+            time.sleep(5)
+            try:
+                result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
+                exception = False
+                break
+            except redis.exceptions.RedisError as e:
+                self.logger.error(f"Redis Error: {str(e)}")
+                exception = True
+
+        if exception:
+            return
         if result == "USER_NOT_FOUND":
             self.logger.error(f"Rollback failed: No user with id {userId}")
             return

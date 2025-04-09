@@ -1,3 +1,5 @@
+import time
+
 import redis
 import json
 from msgspec import msgpack, Struct
@@ -21,8 +23,8 @@ class StockWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers", auto_commit=False)
-        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers", auto_commit=False)
+        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers")
+        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers")
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -116,12 +118,24 @@ class StockWorker():
             args.append(str(amount))
         args.append(orderId)
         self.logger.debug(f"Attempting to rollback stock for order {orderId} on items: {items}")
-        try:
-            result = self.rollback_lua_script(keys=keys, args=args)
-        except redis.exceptions.RedisError as e:
-            self.logger.error(f"Redis Error: {str(e)}")
+        # try:
+        #     result = self.rollback_lua_script(keys=keys, args=args)
+        # except redis.exceptions.RedisError as e:
+        #
+        #     self.logger.error(f"Redis Error: {str(e)}")
+        #     return
+        exception = False
+        for i in range(10):
+            time.sleep(5)
+            try:
+                result = self.rollback_lua_script(keys=keys, args=args)
+                exception = False
+                break
+            except redis.exceptions.RedisError as e:
+                self.logger.error(f"Redis Error: {str(e)}")
+                exception = True
+        if exception:
             return
-        
         if result == b"ITEM_NOT_FOUND":
             self.logger.error("One or more items were not found during stock update.")
             return 
