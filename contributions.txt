@@ -1,0 +1,20 @@
+Tudor Andrei:
+    - initial skeleton for saga
+    - redis replication
+    - manually commiting the offset for the message queue
+Ana Batrineanu:
+    - FastApi
+    - Integrated new async loop
+Matei Tudor Ivan:
+    - Fault tolerance: undo logging and saga rollback
+    - Order recovery logic
+Matei Mihai Mirica:
+    - coffee
+    - kafka setup with fastream + topic partition
+    - redis sentinel setup
+    - order saga worker that awaits completion of sagas with timeouts
+    - changed gateway and congestion parameters
+Stefan Stoicescu:
+    - Lua scripts to ensure Redis atomic transactions
+    - Order recovery logic
+    - Idempotency keys
