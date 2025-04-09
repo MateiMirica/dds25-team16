@@ -16,13 +16,13 @@ class StockValue(Struct):
     price: int
 
 
-class StockWorker():
+class StockWorker :
     def __init__(self, logger, db, router):
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers")
+        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers", auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers", auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -136,7 +136,7 @@ class StockWorker():
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
             return self.stockFailed(msg)
-
+       
         if result == b"ITEM_NOT_FOUND":
             self.logger.error("One or more items were not found during stock update.")
             return self.stockFailed(msg)

@@ -3,7 +3,6 @@ import logging
 import redis
 import json
 from msgspec import msgpack, Struct
-from faststream.kafka import KafkaMessage
 
 class PaymentDBError(Exception):
     """Custom exception for db errors."""
@@ -11,13 +10,13 @@ class PaymentDBError(Exception):
 class UserValue(Struct):
     credit: int
 
-class PaymentWorker():
+class PaymentWorker:
     def __init__(self, logger, db, router):
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
+        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers", auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers", auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
@@ -74,7 +73,6 @@ class PaymentWorker():
 
     def consume_rollback(self, msg: str):
         msg = json.loads(msg)
-        logging.getLogger().info(f"ROLLBACK: {msg}")
         self.performRollback(msg)
 
     def get_user_from_db(self, user_id: str) -> UserValue | None:
@@ -124,7 +122,7 @@ class PaymentWorker():
         except redis.exceptions.RedisError as e:
             self.logger.error(f"Redis Error: {str(e)}")
             return
-
+       
         if result == "USER_NOT_FOUND":
             self.logger.error(f"Rollback failed: No user with id {userId}")
             return
