@@ -29,13 +29,6 @@ class StockWorker():
         self.transaction_lua_script = self.db.register_script(
             """
             local n = #KEYS
-            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
-            if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
-                return "SUCCESS"
-            end
-            if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
-                return "INSUFFICIENT_STOCK"
-            end
             for i = 1, n do
                 local key = KEYS[i]
                 local amount = tonumber(ARGV[i])
@@ -49,6 +42,13 @@ class StockWorker():
                     redis.call("SET", "order:" .. tostring(ARGV[n+1]), cmsgpack.pack("REJECTED"))
                     return "INSUFFICIENT_STOCK"
                 end
+            end
+            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+            if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+                return "SUCCESS"
+            end
+            if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+                return "INSUFFICIENT_STOCK"
             end
             for i = 1, n do
                 local key = KEYS[i]
@@ -66,10 +66,6 @@ class StockWorker():
         self.rollback_lua_script = self.db.register_script(
             """
             local n = #KEYS
-            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
-            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
-                return "SUCCESS"
-            end
             for i = 1, n do
                 local key = KEYS[i]
                 local data = redis.call("GET", key)
@@ -77,6 +73,10 @@ class StockWorker():
                     redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("REJECTED"))
                     return "ITEM_NOT_FOUND"
                 end
+            end
+            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
+                return "SUCCESS"
             end
             for i = 1, n do
                 local key = KEYS[i]
