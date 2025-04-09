@@ -124,6 +124,7 @@ class StockWorker():
         #
         #     self.logger.error(f"Redis Error: {str(e)}")
         #     return
+        result = None
         exception = False
         for i in range(10):
             time.sleep(5)
