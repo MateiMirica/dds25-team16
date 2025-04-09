@@ -32,7 +32,7 @@ class PaymentWorker():
             return "USER_NOT_FOUND"
         end
         
-        local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+        local order_data = redis.call("GET", "order:" .. orderId)
         if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
             return "SUCCESS"
         end

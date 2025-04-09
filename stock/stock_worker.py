@@ -66,6 +66,7 @@ class StockWorker():
         self.rollback_lua_script = self.db.register_script(
             """
             local n = #KEYS
+            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
             if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
                 return "SUCCESS"
             end
@@ -77,7 +78,6 @@ class StockWorker():
                     return "ITEM_NOT_FOUND"
                 end
             end
-            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
             for i = 1, n do
                 local key = KEYS[i]
                 local amount = tonumber(ARGV[i])
