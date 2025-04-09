@@ -9,7 +9,6 @@ Matei Tudor Ivan:
     - Fault tolerance: undo logging and saga rollback
     - Order recovery logic
 Matei Mihai Mirica:
-    - coffee
     - kafka setup with fastream + topic partition
     - redis sentinel setup
     - order saga worker that awaits completion of sagas with timeouts
