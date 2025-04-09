@@ -13,7 +13,7 @@ class RPCWorker:
         self.router = router
         self.unique_group_id = unique_group_id
         self.reply_topic = reply_topic + f"{unique_group_id}"
-        self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id, auto_commit=False)
+        self.subscriber = router.subscriber(self.reply_topic, group_id=unique_group_id)
         self.subscriber(self._handle_responses)
         # self.recovery_logger = RecoveryLogger(f"/order/logs/order_logs_{os.environ["HOSTNAME"]}.txt")
         self.recovery_logger = recovery_logger
