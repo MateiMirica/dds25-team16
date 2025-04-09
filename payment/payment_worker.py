@@ -1,4 +1,5 @@
 import logging
+import time
 
 import redis
 import json
@@ -31,7 +32,15 @@ class PaymentWorker():
         if not user_data then
             return "USER_NOT_FOUND"
         end
-
+        
+        local order_data = redis.call("GET", "order:" .. orderId)
+        if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+            return "SUCCESS"
+        end
+        if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+            return "INSUFFICIENT_FUNDS"
+        end
+        
         local user = cmsgpack.unpack(user_data)
         if user.credit < amount then
             redis.call("SET", "order:" .. orderId, cmsgpack.pack("REJECTED"))
@@ -119,12 +128,26 @@ class PaymentWorker():
         orderId, userId, amount = msg["orderId"], msg["userId"], msg["amount"]
         self.logger.debug(f"Adding {amount} credit to user: {userId}")
 
-        try:
-            result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
-        except redis.exceptions.RedisError as e:
-            self.logger.error(f"Redis Error: {str(e)}")
-            return
+        # try:
+        #     result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
+        # except redis.exceptions.RedisError as e:
+        #     self.logger.error(f"Redis Error: {str(e)}")
+        #     return
 
+        result = None
+        exception = False
+        for i in range(10):
+            try:
+                result = self.rollback_lua_script(keys=[userId], args=[amount,orderId])
+                exception = False
+                break
+            except redis.exceptions.RedisError as e:
+                self.logger.error(f"Redis Error: {str(e)}")
+                exception = True
+                time.sleep(2)
+
+        if exception:
+            return
         if result == "USER_NOT_FOUND":
             self.logger.error(f"Rollback failed: No user with id {userId}")
             return

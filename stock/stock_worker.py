@@ -1,3 +1,5 @@
+import time
+
 import redis
 import json
 from msgspec import msgpack, Struct
@@ -42,6 +44,13 @@ class StockWorker():
                     redis.call("SET", "order:" .. tostring(ARGV[n+1]), cmsgpack.pack("REJECTED"))
                     return "INSUFFICIENT_STOCK"
                 end
+            end
+            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+            if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+                return "SUCCESS"
+            end
+            if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+                return "INSUFFICIENT_STOCK"
             end
             for i = 1, n do
                 local key = KEYS[i]
@@ -109,12 +118,25 @@ class StockWorker():
             args.append(str(amount))
         args.append(orderId)
         self.logger.debug(f"Attempting to rollback stock for order {orderId} on items: {items}")
-        try:
-            result = self.rollback_lua_script(keys=keys, args=args)
-        except redis.exceptions.RedisError as e:
-            self.logger.error(f"Redis Error: {str(e)}")
+        # try:
+        #     result = self.rollback_lua_script(keys=keys, args=args)
+        # except redis.exceptions.RedisError as e:
+        #
+        #     self.logger.error(f"Redis Error: {str(e)}")
+        #     return
+        result = None
+        exception = False
+        for i in range(10):
+            try:
+                result = self.rollback_lua_script(keys=keys, args=args)
+                exception = False
+                break
+            except redis.exceptions.RedisError as e:
+                self.logger.error(f"Redis Error: {str(e)}")
+                exception = True
+                time.sleep(2)
+        if exception:
             return
-        
         if result == b"ITEM_NOT_FOUND":
             self.logger.error("One or more items were not found during stock update.")
             return 
