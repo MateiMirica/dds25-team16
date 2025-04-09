@@ -31,7 +31,15 @@ class PaymentWorker():
         if not user_data then
             return "USER_NOT_FOUND"
         end
-
+        
+        local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+        if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+            return "SUCCESS"
+        end
+        if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+            return "INSUFFICIENT_FUNDS"
+        end
+        
         local user = cmsgpack.unpack(user_data)
         if user.credit < amount then
             redis.call("SET", "order:" .. orderId, cmsgpack.pack("REJECTED"))

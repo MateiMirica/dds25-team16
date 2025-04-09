@@ -29,6 +29,13 @@ class StockWorker():
         self.transaction_lua_script = self.db.register_script(
             """
             local n = #KEYS
+            local order_data = redis.call("GET", "order:" .. ARGV[n+1])
+            if order_data ~= nil and order_data == cmsgpack.pack("PAID") then
+                return "SUCCESS"
+            end
+            if order_data ~= nil and order_data == cmsgpack.pack("REJECTED") then
+                return "INSUFFICIENT_STOCK"
+            end
             for i = 1, n do
                 local key = KEYS[i]
                 local amount = tonumber(ARGV[i])
@@ -59,6 +66,9 @@ class StockWorker():
         self.rollback_lua_script = self.db.register_script(
             """
             local n = #KEYS
+            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
+                return "SUCCESS"
+            end
             for i = 1, n do
                 local key = KEYS[i]
                 local data = redis.call("GET", key)
@@ -68,9 +78,6 @@ class StockWorker():
                 end
             end
             local order_data = redis.call("GET", "order:" .. ARGV[n+1])
-            if order_data ~= nil and order_data == cmsgpack.pack("ROLLEDBACK") then
-                return "SUCCESS"
-            end
             for i = 1, n do
                 local key = KEYS[i]
                 local amount = tonumber(ARGV[i])
