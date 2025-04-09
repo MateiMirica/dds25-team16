@@ -21,8 +21,8 @@ class StockWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers")
+        self.update_subscriber = self.router.subscriber("UpdateStock", group_id="stock_workers", auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackStock", group_id="stock_workers", auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 

@@ -16,8 +16,8 @@ class PaymentWorker():
         self.logger = logger
         self.db = db
         self.router = router
-        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers")
-        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers")
+        self.update_subscriber = self.router.subscriber("UpdatePayment", group_id="payment_workers", auto_commit=False)
+        self.rollback_subscriber = self.router.subscriber("RollbackPayment", group_id="payment_workers", auto_commit=False)
         self.update_subscriber(self.consume_update)
         self.rollback_subscriber(self.consume_rollback)
 
