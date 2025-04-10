@@ -103,6 +103,12 @@ class OrderWorker():
                 msg["amount"] = order_entry.total_cost
                 await self.payment_worker.request_no_response(json.dumps(msg), "RollbackPayment")
                 return None
+            case 'RollbackStock':
+                items_quantities = self.get_items_in_order(order_entry)
+                msg["orderId"] = order_id
+                msg["items"] = items_quantities
+                await self.stock_worker.request_no_response(json.dumps(msg), "RollbackStock")
+
 
     def get_items_in_order(self, order_entry: OrderValue):
         items_quantities: dict[str, int] = defaultdict(int)
