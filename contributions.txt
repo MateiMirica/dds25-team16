@@ -6,13 +6,15 @@ Ana Batrineanu:
     - FastApi
     - Integrated new async loop
 Matei Tudor Ivan:
-    - Fault tolerance: undo logging and saga rollback
+    - Fault tolerance - undo logging
+    - Fault tolerance - saga rollback
     - Order recovery logic
 Matei Mihai Mirica:
     - kafka setup with fastream + topic partition
     - redis sentinel setup
     - order saga worker that awaits completion of sagas with timeouts
     - changed gateway and congestion parameters
+    - fixed issues with fault tolerance inconsistencies
 Stefan Stoicescu:
     - Lua scripts to ensure Redis atomic transactions
     - Order recovery logic
