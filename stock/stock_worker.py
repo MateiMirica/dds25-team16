@@ -93,7 +93,8 @@ class StockWorker():
                     local item = cmsgpack.unpack(data)
                     item.stock = item.stock + amount
                     redis.call("SET", key, cmsgpack.pack(item))
-                    redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("ROLLEDBACK"))
+                end
+                redis.call("SET", "order:" .. ARGV[n+1], cmsgpack.pack("ROLLEDBACK"))
             end
             return "SUCCESS"
             """
