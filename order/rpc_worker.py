@@ -62,6 +62,8 @@ class RPCWorker:
                 logging.getLogger().info(f"Sending stock rollback {msg}")
                 await self.request_no_response(json.dumps(message), "RollbackStock")
                 self.recovery_logger.write_to_log(message["orderId"], COMPLETED_ORDER)
+            order_entry.status = "completed"
+            self.db.set(message["orderId"], msgpack.encode(order_entry))
 
 
     async def request(

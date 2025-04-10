@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 tmp_folder_path: str = os.path.join(gettempdir(), 'wdm_consistency_test')
 
-NUMBER_OF_ORDERS = 10000
+NUMBER_OF_ORDERS = 25000
 
 with open(os.path.join('..', 'urls.json')) as f:
     urls = json.load(f)
