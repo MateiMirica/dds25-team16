@@ -87,3 +87,4 @@ async def verify_systems_consistency(tmp_dir: str, item_ids, user_ids):
     logger.info(f"Payment service inconsistencies in the logs: {abs(CORRECT_USER_STATE - logged_user_credit)}")
     server_side_user_credit: int = sum(list(uic.values()))
     logger.info(f"Payment service inconsistencies in the database: {abs(CORRECT_USER_STATE - server_side_user_credit)}")
+    logger.info(f"Items bought {server_side_items_bought}")
