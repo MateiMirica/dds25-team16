@@ -65,13 +65,13 @@ def close_db_connection():
 
 atexit.register(close_db_connection)
 
-batch_create_order_lua_script = db.register_script(""""
+batch_create_order_lua_script = db.register_script("""
 local n = tonumber(ARGV[1])
 local n_items = tonumber(ARGV[2])
 local n_users = tonumber(ARGV[3])
 local item_price = tonumber(ARGV[4])
 
-math.randomseed(os.time())
+math.randomseed(tonumber(redis.call("TIME")[2]))
 
 for i = 0, n - 1 do
     local user_id = tostring(math.random(0, n_users - 1))
@@ -113,7 +113,8 @@ def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
 
     try:
         batch_create_order_lua_script(keys=[], args=[n, n_items, n_users, item_price])
-    except redis.exceptions.RedisError:
+    except redis.exceptions.RedisError as e:
+        logger.info(str(e))
         raise HTTPException(400, DB_ERROR_STR)
     return {"msg": "Batch init for orders successful"}
 
