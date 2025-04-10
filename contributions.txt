@@ -6,7 +6,8 @@ Ana Batrineanu:
     - FastApi
     - Integrated new async loop
 Matei Tudor Ivan:
-    - Fault tolerance: undo logging and saga rollback
+    - Fault tolerance - undo logging
+    - Fault tolerance - saga rollback
     - Order recovery logic
 Matei Mihai Mirica:
     - kafka setup with fastream + topic partition
