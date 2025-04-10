@@ -6,6 +6,9 @@ from faststream.kafka.fastapi import KafkaRouter
 from RecoveryLogger import RecoveryLogger
 from msgspec import msgpack, Struct
 
+class OrderDBError(Exception):
+    """Custom exception for db errors."""
+
 COMPLETED_ORDER = "COMPLETED"
 class OrderValue(Struct):
     paid: bool
@@ -26,6 +29,18 @@ class RPCWorker:
         self.recovery_logger = recovery_logger
         self.db = db
 
+    def get_order_from_db(self, order_id: str) -> OrderValue | None:
+        try:
+            # get serialized data
+            entry: bytes = self.db.get(order_id)
+        except redis.exceptions.RedisError:
+            raise OrderDBError("can't reach Redis")
+        # deserialize data if it exists else return null
+        entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None
+        if entry is None:
+            # if order does not exist in the database
+            raise OrderDBError("can't reach Redis")
+        return entry
     async def _handle_responses(self, msg) -> None:
         message = json.loads(msg)
         if message["serviceId"] != self.unique_group_id:
