@@ -49,10 +49,10 @@ class OrderWorker():
             if order_entry.status == "completed":
                 continue
 
+            order_entry.status = "completed"
             if payment_status == Status.PAID and stock_status == Status.PAID:
                 self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
                 order_entry.paid = True
-                self.db.set(order_id, msgpack.encode(order_entry))
             elif payment_status == Status.PAID and stock_status == Status.REJECTED:
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
                 self.logger.info("ROLLBACK PAYMENT")
@@ -77,6 +77,7 @@ class OrderWorker():
             else:
                 self.logger.info("UNKNOWN STATE")
                 self.logger.info(payment_status + " " + stock_status + " " + order_id)
+            self.db.set(order_id, msgpack.encode(order_entry))
 
         self.logger.info("FINISHED REPAIRING STATE")
 
@@ -138,10 +139,15 @@ class OrderWorker():
                 self.logger.info(f"Rolling back payment for order {order_id}")
                 await self.create_message_and_send('RollbackPayment', order_id, order_entry)
 
+        order_entry_copy = self.get_order_from_db(order_id)
+        if order_entry_copy.status == 'completed':
+            order_entry.paid = False
+            await self.create_message_and_send('RollbackPayment', order_id, order_entry)
+            await self.create_message_and_send('RollbackStock', order_id, order_entry)
+        else:
+            self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
         order_entry.status = "completed"
         self.db.set(order_id, msgpack.encode(order_entry))
-        self.recovery_logger.write_to_log(order_id, COMPLETED_ORDER)
-
         return order_entry
 
     def get_order_from_db(self, order_id: str) -> OrderValue | None:
